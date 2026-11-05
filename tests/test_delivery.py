@@ -55,6 +55,10 @@ class DeliveryTests(unittest.TestCase):
             "namespace": "Example", "cli": "example-cli", "language": "go",
             "feature": "greeting", "version": "0.1.0",
         }
+        repository_environment = patch.dict(
+            os.environ, {"GITHUB_REPOSITORY": "owner/example-component"})
+        repository_environment.start()
+        self.addCleanup(repository_environment.stop)
         self.write_config()
         self.component = self.root / "component" / self.config["repository"]
         self.project = self.component / "Project" / "example-component.4DProject"
@@ -170,6 +174,13 @@ class DeliveryTests(unittest.TestCase):
         with zipfile.ZipFile(archive) as packed:
             self.assertFalse(any("/bin/macOS/" in name or "DEVELOPMENT" in name for name in packed.namelist()))
             self.assertTrue(any("/bin/Windows/" in name for name in packed.namelist()))
+
+    def test_assembly_still_rejects_a_conflicting_repository_environment(self):
+        self.windows_scope()
+        self.build_fixture("windows-x64", synthetic_pe())
+        with patch.dict(os.environ, {"GITHUB_REPOSITORY": "owner/AnotherComponent"}):
+            with self.assertRaisesRegex(ValueError, "actual repository does not match"):
+                ci_config.assemble(self.root)
 
     def test_development_is_explicit_native_thin_and_cannot_be_production(self):
         self.windows_scope()
