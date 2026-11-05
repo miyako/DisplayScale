@@ -147,7 +147,7 @@ attempt. The ZIP includes an explicit DEVELOPMENT marker and no Windows
 resource. It is **not** the production `dist/DisplayScale.zip` and remains
 `release_ready:false`. No C++ cross-build is attempted.
 
-The release workflow is deliberately fail-closed until real Windows 4D source
+The Publish workflow is deliberately fail-closed until real Windows 4D source
 and compiled-package host acceptance is integrated. A green CLI job or macOS
 unsupported-backend host check is not release readiness. No release/tag is
 created by build or package commands.
@@ -158,7 +158,36 @@ builds ARM64 macOS libraries plus x64 generic code. There is no approved native
 Windows tool4d URL/SHA256 or Windows source/final-package host workflow. Reusing
 the macOS pin cannot execute a Windows host. No release/tag/asset exists for a
 real GitHub dependency-manager download, and publication is not authorized.
+Windows 4D 21.0 cannot link the `arm64_macOS_lib` target that
+`compile_component.py`, `tooling/compiler` and the packager require, so a
+Windows compile path also needs target-aware changes. See
+[#2](https://github.com/miyako/DisplayScale/issues/2) for emulated (Windows
+ARM64) diagnostics; those are not native x64 acceptance.
 
+### Running workflows from the Actions tab
+
+Both workflows are started with **Actions → Run workflow**:
+
+* **CI** (any branch): configuration and Python checks, the native Windows x64
+  CLI build/tests and runtime-import check, and production resource assembly.
+  The optional macOS development-backend 4D job runs only with the repository
+  variable `FOURD_ENABLED=true`. Green CI is CLI/resource evidence, not Windows
+  4D host evidence.
+* **Publish** (`main` only): choose **patch**, **minor** or **major**. The
+  next version is computed from the highest stable `v*` tag (with none, from
+  `package.json.version`; patch would yield `0.1.1`). The workflow stages the
+  version surfaces (`scripts/bump_release.py`), then validates before
+  committing anything. Today every run stops in the `version` job at
+  *Fail closed pending pinned Windows runtime…*, because
+  `ci_config.py validate --release` requires `FOURD_ENABLED=true` and rejects a
+  Windows x64-only release until the blockers above are resolved. Such a run
+  makes no commit, tag or release.
+
+  After the gate is lifted, Publish commits the version bump to `main`, builds
+  the Windows CLI from that exact SHA, compiles and host-tests the unpacked
+  package, then creates the tag and release only after final asset
+  validation. Apple signing/notarization does not apply: the workflow uses no
+  Apple secrets and rejects a `release-policy.json` that would require it.
 ## Installation after an accepted release
 
 No production release is implied by this initial implementation. A future
