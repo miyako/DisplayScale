@@ -1,7 +1,7 @@
 # _CLI (internal convention)
 
 `cs._CLI.new(executableName : Text; target : Text)` is the reusable bundled
-executable resolver. The host can technically access `cs.TemplateCLI._CLI`;
+executable resolver. The host can technically access `cs.DisplayScale._CLI`;
 underscore naming is not true private access in 4D.
 
 `execute(arguments : Collection) : Object` selects `/RESOURCES/bin/macOS/<name>`
@@ -10,9 +10,11 @@ File to a physical path using `File(file.platformPath; fk platform path)`, then
 delegates to `_Process`. There is deliberately no PATH search, permission repair,
 shell, download, copied PDF algorithm or queue.
 
-macOS default/`macOS-universal` uses the two-slice executable. Windows requires
+macOS default/`macOS-universal` is retained as a generic adapter target for
+development-only unsupported-platform host validation; it does not enable
+DisplayScale monitor queries. Production resources are Windows-only. Windows requires
 explicit `Windows-x64`. Unknown selection or OS returns an explicit error;
-Windows ARM64 native execution is not implemented. See [Greeting](Greeting.md)
+Windows ARM64 native execution is not implemented. See [Display](Display.md)
 for the common result/error shape.
 
 The read-only `compiled` Boolean evaluates `Is compiled mode` inside the

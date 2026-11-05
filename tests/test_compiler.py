@@ -15,7 +15,7 @@ spec.loader.exec_module(compiler)
 
 class CompilerTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="compile tests ")
+        self.temp = tempfile.TemporaryDirectory(prefix=".compiler-test-", dir=ROOT)
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name).resolve()
         config = json.loads((ROOT / "template.json").read_text())
@@ -25,9 +25,14 @@ class CompilerTests(unittest.TestCase):
             shutil.copy2(ROOT / name, self.root / name)
         self.name = config["repository"]
         self.feature_class = config.get("feature_class", "Greeting")
-        shutil.copytree(ROOT / "component" / self.name, self.root / "component" / self.name)
+        shutil.copytree(ROOT / "component" / self.name, self.root / "component" / self.name,
+                        ignore=shutil.ignore_patterns("DerivedData", "Libraries"))
         self.project = self.root / "component" / self.name / "Project" / (self.name + ".4DProject")
         self.status = self.root / "build/compile-status.json"
+
+    def test_fixture_excludes_live_generated_compiler_state(self):
+        self.assertFalse((self.project.parent / "DerivedData").exists())
+        self.assertFalse((self.project.parent.parent / "Libraries").exists())
 
     def result(self, args, **kwargs):
         self.status.write_text(json.dumps({"success": True, "project": self.project.as_posix(),

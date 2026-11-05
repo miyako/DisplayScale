@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ steps.release_ref.outputs.sha }}
-      - name: Require initialized matching repository, version tag and explicit 4D opt-in
+      - name: Fail closed pending pinned Windows runtime and real Windows source/compiled host acceptance
         env:
           FOURD_ENABLED: ${{ vars.FOURD_ENABLED }}
           RELEASE_TAG: ${{ steps.release_ref.outputs.tag }}
@@ -81,9 +81,8 @@ jobs:
           component = pathlib.Path("component") / config["repository"]
           destination = component / "Resources" / "bin"
           shutil.copytree("build/resources", destination, dirs_exist_ok=True)
-          mac, windows = validate_resources(component, config["cli"])
-          mac.chmod(0o755)
-          windows.chmod(0o755)
+          for resource in validate_resources(component, config["cli"], config["resource_targets"]):
+              resource.chmod(0o755)
       - name: Download SHA-256-verified tool4D
         run: python scripts/ci_config.py download-tool4d
       - name: Test interpreted component from a real 4D host before compilation
@@ -135,4 +134,4 @@ jobs:
         run: |
           git fetch --force --no-tags origin "+refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
           python scripts/release_ref.py verify --tag "$RELEASE_TAG" --expected-sha "$RELEASE_SHA"
-          gh release create "$RELEASE_TAG" dist/*.zip --verify-tag --title "$RELEASE_TAG" --notes "Unsigned compiled component with universal macOS and x64 Windows CLI resources. Interpreted class and method sources are excluded. This artifact is not signed or notarized. Built with the free tool4D compiler from an explicitly SHA-256-pinned download."
+          gh release create "$RELEASE_TAG" dist/*.zip --verify-tag --title "$RELEASE_TAG" --notes "Unsigned compiled Windows x64 DisplayScale component. Interpreted class and method sources are excluded. Not signed or notarized. Publication is blocked until pinned Windows runtime and actual Windows source/compiled package host acceptance are implemented."

@@ -10,14 +10,14 @@ import sys
 
 from build_cli import build, native_target, smoke_test
 from build_provenance import commit, sha256
-from ci_config import ROOT, TARGETS, assemble, load_config, require_tool4d_host
+from ci_config import ROOT, TARGETS, assemble, load_config, require_tool4d_host, resource_targets
 from compile_component import compile_component
 from doctor import doctor
 from package_component import package, unpack_for_test, validate_resources
 from test_4d import test_4d
 
 
-def accept(root, repository, tool4d, cross=False):
+def accept(root, repository, tool4d, cross=False, local_development=False):
     root = Path(root).resolve()
     output = root / "build/acceptance.json"
     if any(path.is_symlink() for path in [output, *output.parents]):
@@ -45,6 +45,12 @@ def accept(root, repository, tool4d, cross=False):
     save()
     try:
         config = load_config(root, initialized=True, repository=repository)
+        if local_development and cross:
+            raise ValueError("development backend acceptance cannot cross-build production resources")
+        targets_for_resources = resource_targets(config, local_development)
+        if local_development:
+            report["scope"] = "local-development"
+            report["feature_support"] = False
         report["configuration"] = config
         report["doctor"] = doctor(root, tool4d)
         require_tool4d_host()
@@ -77,9 +83,9 @@ def accept(root, repository, tool4d, cross=False):
             else:
                 report["steps"]["cli_rosetta"]["reason"] = "Rosetta unavailable: " + probe.stderr.decode("utf-8", errors="replace")
         # Existing manifests are accepted only when bound to current source and commit.
-        step("assembly", lambda: assemble(root))
+        step("assembly", lambda: assemble(root, local_development))
         component = root / "component" / config["repository"]
-        validate_resources(component, config["cli"])
+        validate_resources(component, config["cli"], targets_for_resources)
         def dependencies():
             result = subprocess.run(["otool", "-L", str(component / "Resources/bin/macOS" / config["cli"])],
                                     capture_output=True, text=True, check=True)
@@ -93,7 +99,8 @@ def accept(root, repository, tool4d, cross=False):
         source = step("source_host", lambda: test_4d(root, tool4d))
         (output.parent / "source-host-status.json").write_text(json.dumps(source, indent=2) + "\n")
         step("compile", lambda: compile_component(root, tool4d))
-        archive = step("package", lambda: package(root, repository=repository, tag="v" + config["version"]))
+        archive = step("package", lambda: package(root, repository=repository, tag="v" + config["version"],
+                                                 local_development=local_development))
         report["artifact"] = {"path": str(archive), "sha256": sha256(archive), "bytes": archive.stat().st_size}
         unpacked = unpack_for_test(root, archive)
         compiled = step("compiled_host", lambda: test_4d(root, tool4d, unpacked))
@@ -103,6 +110,8 @@ def accept(root, repository, tool4d, cross=False):
         report["finished"] = True
         report["finished_at"] = datetime.now(timezone.utc).isoformat()
         report["reason"] = "Local package verified; hosted/native Intel4D/Windows4D/release/signing remain separate observations"
+        if local_development:
+            report["reason"] = "DEVELOPMENT package: native macOS unsupported backend and 4D wiring only; Windows display feature and Windows 4D acceptance not exercised"
         save()
         evidence = archive.with_suffix(".acceptance.json")
         if evidence.is_symlink():
@@ -121,9 +130,11 @@ def main():
     parser.add_argument("--repository", required=True)
     parser.add_argument("--tool4d", type=Path, required=True)
     parser.add_argument("--cross", action="store_true", help="Go/macOS cross-build all targets, not foreign runtime proof")
+    parser.add_argument("--local-development", action="store_true",
+                        help="accept native macOS unsupported backend only; produces a DEVELOPMENT package")
     args = parser.parse_args()
     try:
-        report = accept(args.root, args.repository, args.tool4d, args.cross)
+        report = accept(args.root, args.repository, args.tool4d, args.cross, args.local_development)
     except (ValueError, OSError, KeyError, TypeError, subprocess.SubprocessError) as error:
         parser.exit(2, f"local acceptance failed (see build/acceptance.json): {error}\n")
     print(json.dumps({"result": report["result"], "release_ready": False,

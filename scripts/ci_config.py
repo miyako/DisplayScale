@@ -21,6 +21,7 @@ from initialize import validate as validate_initialization
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGETS = ("macos-x64", "macos-arm64", "windows-x64")
+TOOL4D_DOWNLOAD_HOSTS = {"resources-download.4d.com", "builds2.4d.com"}
 SEMVER = r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
 
 
@@ -35,6 +36,11 @@ def load_config(root=ROOT, *, initialized=False, repository=None, tag=None):
         raise ValueError("invalid CLI name")
     if not re.fullmatch(SEMVER, config.get("version", ""), flags=re.ASCII):
         raise ValueError("version must be SemVer")
+    if "resource_targets" in config and config["resource_targets"] != ["windows-x64"]:
+        raise ValueError("explicit resource_targets currently supports Windows x64 only")
+    if ("unsupported_backend_platforms" in config
+            and config["unsupported_backend_platforms"] != ["Darwin"]):
+        raise ValueError("unsupported_backend_platforms currently supports Darwin only")
     manifest = json.loads((Path(root) / "package.json").read_text(encoding="utf-8"))
     if not isinstance(manifest, dict) or manifest.get("name") != config["repository"]:
         raise ValueError("package.json name must match template.json repository")
@@ -86,8 +92,21 @@ def matrix(config):
     ]}
 
 
-def assemble(root=ROOT):
-    from build_provenance import verify
+def resource_targets(config, local_development=False):
+    if local_development:
+        from build_cli import native_target
+        if (config.get("resource_targets") != ["windows-x64"]
+                or config.get("unsupported_backend_platforms") != ["Darwin"]):
+            raise ValueError("local development requires an explicit Windows-only feature and Darwin unsupported backend")
+        native = native_target()
+        if not native.startswith("macos-"):
+            raise ValueError("local development backend is native macOS only")
+        return (native,)
+    return tuple(config.get("resource_targets", TARGETS))
+
+
+def assemble(root=ROOT, local_development=False):
+    from build_provenance import sha256, verify
     root = Path(root)
     config = load_config(root, initialized=True, repository=os.environ.get("GITHUB_REPOSITORY"))
     destination = root / "component" / config["repository"] / "Resources" / "bin"
@@ -95,12 +114,31 @@ def assemble(root=ROOT):
         raise ValueError("resource assembly destination must not traverse symlinks")
     mac = destination / "macOS" / config["cli"]
     windows = destination / "Windows" / (config["cli"] + ".exe")
+    targets = resource_targets(config, local_development)
     inputs = [root / "build" / target / (config["cli"] + (".exe" if target == "windows-x64" else ""))
-              for target in TARGETS]
+              for target in targets]
     if not all(path.is_file() and not path.is_symlink() for path in inputs):
-        raise ValueError("all three native build artifacts are required")
-    for target, path in zip(TARGETS, inputs):
-        verify(root, target, path)
+        raise ValueError("all required native build artifacts are required: " + ", ".join(targets))
+    manifests = []
+    for target, path in zip(targets, inputs):
+        status = verify(root, target, path)
+        if config.get("resource_targets") and status.get("execution") != "passed":
+            raise ValueError("explicit production/development resources require native CLI execution: " + target)
+        manifests.append(status)
+    if config.get("resource_targets"):
+        if destination.exists():
+            if any(path.is_symlink() for path in destination.rglob("*")):
+                raise ValueError("existing resources must not contain symlinks")
+            shutil.rmtree(destination)
+        selected = mac if local_development else windows
+        selected.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(inputs[0], selected)
+        selected.chmod(0o755)
+        marker = {"schema": 1, "profile": "development" if local_development else "production",
+                  "targets": list(targets), "builds": manifests,
+                  "resources": {selected.relative_to(destination).as_posix(): sha256(selected)}}
+        (destination / "resource-manifest.json").write_text(json.dumps(marker, indent=2) + "\n")
+        return destination
     mac.parent.mkdir(parents=True, exist_ok=True)
     windows.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["lipo", "-create", str(inputs[0]), str(inputs[1]), "-output", str(mac)], check=True)
@@ -226,7 +264,10 @@ def download_tool4d(root=ROOT, *, url=None, digest=None):
     try:
         with urllib.request.urlopen(url, timeout=120) as response, archive.open("wb") as output:
             redirected = urllib.parse.urlsplit(response.geturl())
-            if redirected.scheme != "https" or redirected.hostname != "resources-download.4d.com":
+            # Fixed public URLs redirect to 4D's archive CDN with a signed query.
+            if (redirected.scheme != "https" or redirected.hostname not in TOOL4D_DOWNLOAD_HOSTS
+                    or redirected.username or redirected.password or redirected.fragment
+                    or redirected.port not in (None, 443)):
                 raise ValueError("tool4D download redirected outside official HTTPS origin")
             while chunk := response.read(1024 * 1024):
                 sha.update(chunk)
@@ -295,6 +336,8 @@ def main():
     parser.add_argument("command", choices=("matrix", "validate", "assemble", "download-tool4d"))
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--release", action="store_true")
+    parser.add_argument("--local-development", action="store_true",
+                        help="assemble only the native macOS unsupported backend; never a production resource")
     parser.add_argument("--tag", help="explicit normalized release tag (manual dispatch); defaults to GITHUB_REF_NAME")
     parser.add_argument("--url", help="optional official URL override, paired with --sha256")
     parser.add_argument("--sha256", help="optional approved hash override; otherwise env pair/package.json.tool")
@@ -312,6 +355,10 @@ def main():
             tag=(args.tag if args.tag is not None else os.environ.get("GITHUB_REF_NAME", "")) if args.release else None)
         if args.release and os.environ.get("FOURD_ENABLED") != "true":
             raise ValueError("releases require FOURD_ENABLED=true")
+        if args.release and config.get("resource_targets") == ["windows-x64"]:
+            raise ValueError("release blocked: pinned Windows 4D runtime and real source/compiled package host acceptance are unavailable")
+        if args.local_development and args.command != "assemble":
+            raise ValueError("--local-development applies only to assemble")
         if args.command == "matrix":
             value = json.dumps(matrix(config), separators=(",", ":"))
             print(value)
@@ -321,7 +368,7 @@ def main():
                     stream.write(f"initialized={str(config['initialized']).lower()}\n")
                     stream.write(f"language={config['language'] or 'none'}\n")
         elif args.command == "assemble":
-            destination = assemble(args.root)
+            destination = assemble(args.root, args.local_development)
             print(destination)
             if output := os.environ.get("GITHUB_OUTPUT"):
                 with open(output, "a", encoding="utf-8") as stream:

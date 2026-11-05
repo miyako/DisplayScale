@@ -18,6 +18,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import build_cli
+import accept_local
 import ci_config
 import package_component
 from compile_component import input_digest, output_digest
@@ -54,6 +55,10 @@ class DeliveryTests(unittest.TestCase):
             "namespace": "Example", "cli": "example-cli", "language": "go",
             "feature": "greeting", "version": "0.1.0",
         }
+        repository_environment = patch.dict(
+            os.environ, {"GITHUB_REPOSITORY": "owner/example-component"})
+        repository_environment.start()
+        self.addCleanup(repository_environment.stop)
         self.write_config()
         self.component = self.root / "component" / self.config["repository"]
         self.project = self.component / "Project" / "example-component.4DProject"
@@ -142,6 +147,151 @@ class DeliveryTests(unittest.TestCase):
             self.assertEqual([entry["runner"] for entry in entries],
                              ["macos-15-intel", "macos-15", "windows-2022"])
             self.assertEqual({entry["language"] for entry in entries}, {language})
+
+    def windows_scope(self):
+        self.config.update(resource_targets=["windows-x64"], unsupported_backend_platforms=["Darwin"])
+        self.write_config()
+
+    def build_fixture(self, target, data, tested=True):
+        path = self.root / "build" / target / (self.config["cli"] + (".exe" if target == "windows-x64" else ""))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        record(self.root, target, path, tested, "synthetic fixture, not execution evidence")
+        return path
+
+    def thin_fixture(self):
+        data = bytearray(32)
+        struct.pack_into("<IIII", data, 0, 0xFEEDFACF, 0x0100000C, 0, 2)
+        return bytes(data)
+
+    def test_windows_production_assembly_and_package_have_no_mac_backend(self):
+        self.windows_scope()
+        self.build_fixture("windows-x64", synthetic_pe())
+        ci_config.assemble(self.root)
+        self.assertFalse(self.mac.exists())
+        self.write_status()
+        archive = self.package()
+        with zipfile.ZipFile(archive) as packed:
+            self.assertFalse(any("/bin/macOS/" in name or "DEVELOPMENT" in name for name in packed.namelist()))
+            self.assertTrue(any("/bin/Windows/" in name for name in packed.namelist()))
+
+    def test_assembly_still_rejects_a_conflicting_repository_environment(self):
+        self.windows_scope()
+        self.build_fixture("windows-x64", synthetic_pe())
+        with patch.dict(os.environ, {"GITHUB_REPOSITORY": "owner/AnotherComponent"}):
+            with self.assertRaisesRegex(ValueError, "actual repository does not match"):
+                ci_config.assemble(self.root)
+
+    def test_development_is_explicit_native_thin_and_cannot_be_production(self):
+        self.windows_scope()
+        self.build_fixture("macos-arm64", self.thin_fixture())
+        with patch.object(build_cli, "native_target", return_value="macos-arm64"):
+            ci_config.assemble(self.root, local_development=True)
+            self.assertFalse(self.windows.exists())
+            self.write_status()
+            archive = self.package(local_development=True)
+            self.assertEqual(archive.parent.name, "development")
+            with zipfile.ZipFile(archive) as packed:
+                marker = json.loads(packed.read("example-component.4dbase/DEVELOPMENT.json"))
+                self.assertIs(marker["feature_support"], False)
+                self.assertIs(marker["release_ready"], False)
+                self.assertFalse(any("/bin/Windows/" in name for name in packed.namelist()))
+            with self.assertRaises(ValueError):
+                self.package()
+
+    def test_resource_profile_rejects_stale_source_tampering_extra_binary_and_unexecuted_build(self):
+        self.windows_scope()
+        self.build_fixture("windows-x64", synthetic_pe(), tested=False)
+        with self.assertRaisesRegex(ValueError, "native CLI execution"):
+            ci_config.assemble(self.root)
+        self.build_fixture("windows-x64", synthetic_pe())
+        ci_config.assemble(self.root)
+        self.write_status()
+        self.windows.write_bytes(synthetic_pe() + b"tampered")
+        self.write_status()
+        with self.assertRaisesRegex(ValueError, "provenance"):
+            self.package()
+        ci_config.assemble(self.root)
+        self.mac.parent.mkdir(parents=True)
+        self.mac.write_bytes(self.thin_fixture())
+        self.write_status()
+        with self.assertRaisesRegex(ValueError, "unexpected"):
+            self.package()
+        ci_config.assemble(self.root)
+        (self.root / "cli/main.go").write_text("changed source")
+        self.write_status()
+        with self.assertRaisesRegex(ValueError, "provenance"):
+            self.package()
+
+    def test_development_thin_header_and_target_scope_fail_closed(self):
+        self.windows_scope()
+        self.mac.write_bytes(self.thin_fixture())
+        package_component.validate_resources(self.component, self.config["cli"], ("macos-arm64",))
+        with self.assertRaisesRegex(ValueError, "matching native thin"):
+            package_component.validate_resources(self.component, self.config["cli"], ("macos-x64",))
+        self.config["resource_targets"] = ["macos-arm64"]
+        self.write_config()
+        with self.assertRaisesRegex(ValueError, "Windows x64 only"):
+            ci_config.load_config(self.root)
+
+    def test_windows_release_is_blocked_even_with_hosted_opt_in(self):
+        self.windows_scope()
+        environment = {"GITHUB_REPOSITORY": "owner/example-component", "FOURD_ENABLED": "true"}
+        with patch.dict(os.environ, environment, clear=True), patch.object(
+                sys, "argv", ["ci_config.py", "validate", "--release", "--tag", "v0.1.0",
+                              "--root", str(self.root)]):
+            with self.assertRaises(SystemExit) as caught:
+                ci_config.main()
+            self.assertEqual(caught.exception.code, 2)
+
+    def test_platform_cli_vectors_do_not_claim_darwin_feature_success(self):
+        contract = self.root / "contract.json"
+        version = {"args": ["--version"], "exitCode": 0, "stdout": "version\n", "stderr": ""}
+        windows = {"platforms": ["Windows"], "args": ["monitors"], "exitCode": 0,
+                   "stdout": "monitors\n", "stderr": ""}
+        unsupported = {"platforms": ["Darwin"], "args": ["monitors"], "exitCode": 3,
+                       "stdout": "", "stderr": "UNSUPPORTED_PLATFORM\n"}
+        contract.write_text(json.dumps({"schema": 1, "cases": [version, windows, unsupported]}))
+        results = [subprocess.CompletedProcess([], 0, b"version\n", b""),
+                   subprocess.CompletedProcess([], 3, b"", b"UNSUPPORTED_PLATFORM\n")]
+        with patch.object(build_cli.platform, "system", return_value="Darwin"):
+            with self.assertRaisesRegex(ValueError, "feature success"):
+                build_cli.smoke_test("fixture", "0.1.0", contract)
+            with patch.object(build_cli.subprocess, "run", side_effect=results) as run:
+                build_cli.smoke_test("fixture", "0.1.0", contract, unsupported_backend=True)
+                self.assertEqual(run.call_count, 2)
+            contract.write_text(json.dumps({"schema": 1, "cases": [version]}))
+            with self.assertRaisesRegex(ValueError, "UNSUPPORTED_PLATFORM"):
+                build_cli.smoke_test("fixture", "0.1.0", contract, unsupported_backend=True)
+
+    def test_development_acceptance_forwards_profile_and_never_claims_windows_execution(self):
+        self.windows_scope()
+        tool = self.root / "test-only-tool4d"
+        tool.write_bytes(b"mock compiler; never executed")
+        archive = self.root / "dist/development/example-component.zip"
+        archive.parent.mkdir(parents=True)
+        archive.write_bytes(b"mock artifact; not runtime evidence")
+        source = {"success": True, "finished": True, "compiled": False}
+        compiled = {**source, "compiled": True}
+        with patch.object(build_cli, "native_target", return_value="macos-arm64"), patch.object(
+                accept_local, "native_target", return_value="macos-arm64"), patch.object(
+                accept_local, "require_tool4d_host"), patch.object(accept_local, "doctor", return_value={}), patch.object(
+                accept_local, "build") as build, patch.object(accept_local, "assemble") as assemble, patch.object(
+                accept_local, "validate_resources"), patch.object(accept_local, "test_4d", side_effect=[source, compiled]), patch.object(
+                accept_local, "compile_component", return_value={"success": True}), patch.object(
+                accept_local, "package", return_value=archive) as package, patch.object(
+                accept_local, "unpack_for_test", return_value=self.root / "unpacked.4dbase"), patch.object(
+                accept_local.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "test-only tool4d identity\n", "")):
+            report = accept_local.accept(self.root, "owner/example-component", tool, local_development=True)
+        assemble.assert_called_once_with(self.root, True)
+        self.assertTrue(package.call_args.kwargs["local_development"])
+        self.assertEqual(build.call_args.args[1], "macos-arm64")
+        self.assertEqual(report["scope"], "local-development")
+        self.assertFalse(report["feature_support"])
+        self.assertFalse(report["release_ready"])
+        self.assertEqual(report["steps"]["cli_test_windows-x64"]["status"], "not_run")
+        self.assertEqual(report["steps"]["windows_4d"]["status"], "not_run")
+        self.assertTrue(archive.with_suffix(".acceptance.json").is_file())
 
     def test_assembly_places_file_before_variadic_verify_arch_option(self):
         inputs = []
@@ -471,9 +621,9 @@ class DeliveryTests(unittest.TestCase):
             archive.writestr(info, data)
         return output.getvalue()
 
-    def download(self, data, digest=None):
+    def download(self, data, digest=None, final_url="https://resources-download.4d.com/fixed/tool4d.zip"):
         response = io.BytesIO(data)
-        response.geturl = lambda: "https://resources-download.4d.com/fixed/tool4d.zip"
+        response.geturl = lambda: final_url
         environment = {
             "TOOL4D_URL": "https://resources-download.4d.com/fixed/tool4d.zip",
             "TOOL4D_SHA256": digest or hashlib.sha256(data).hexdigest(),
@@ -481,6 +631,35 @@ class DeliveryTests(unittest.TestCase):
         with patch.dict(os.environ, environment, clear=True), patch.object(
                 ci_config.urllib.request, "urlopen", return_value=response):
             return ci_config.download_tool4d(self.root)
+
+    def test_official_https_archive_cdn_redirect_preserves_pinned_sha256(self):
+        data = self.archive_bytes("tool4d.app/Contents/MacOS/tool4d")
+        cdn = "https://builds2.4d.com/4D_archive_tool-arm_mac_intl_release_20.x_101905.tar.xz?signature=test-only"
+        with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
+            self.download(data, "0" * 64, final_url=cdn)
+        executable = self.download(data, final_url=cdn)
+        self.assertEqual(executable.read_bytes(), b"tool4d")
+        self.assertEqual(executable.stat().st_mode & 0o777, 0o755)
+
+    def test_tool4d_redirect_rejects_unrelated_insecure_or_credentialed_origins(self):
+        data = self.archive_bytes("tool4d.app/Contents/MacOS/tool4d")
+        for url in ("https://unrelated.example/tool4d.zip",
+                    "https://builds2.4d.com.example/tool4d.zip",
+                    "http://builds2.4d.com/tool4d.zip",
+                    "http://resources-download.4d.com/tool4d.zip",
+                    "https://user:password@builds2.4d.com/tool4d.zip",
+                    "https://builds2.4d.com:444/tool4d.zip",
+                    "https://builds2.4d.com/tool4d.zip#fragment"):
+            with self.subTest(url=url), self.assertRaisesRegex(ValueError, "official HTTPS origin"):
+                self.download(data, final_url=url)
+            self.assertFalse((self.root / ".tools/tool4d.download").exists())
+            self.assertFalse((self.root / ".tools/tool4d.app").exists())
+
+    def test_cdn_is_redirect_only_not_an_approved_mutable_input_pin(self):
+        for url in ("https://builds2.4d.com/fixed/tool4d.tar.xz",
+                    "https://resources-download.4d.com/fixed/tool4d.tar.xz?signature=test-only"):
+            with self.subTest(url=url), self.assertRaisesRegex(ValueError, "official HTTPS tool4d URL"):
+                ci_config.checked_tool_pin(url, "0" * 64)
 
     def test_verified_tool4d_download_and_permissions(self):
         executable = self.download(self.archive_bytes("tool4d.app/Contents/MacOS/tool4d"))
