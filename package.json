@@ -1,6 +1,6 @@
 {
   "name": "DisplayScale",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Read effective per-monitor display scaling on Windows 10 1703+ x64",
   "license": "MIT",
