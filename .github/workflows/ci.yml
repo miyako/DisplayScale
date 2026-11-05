@@ -75,6 +75,9 @@ jobs:
       - name: Native build and protocol smoke tests
         run: python scripts/build_cli.py --target "$CLI_TARGET" --language "$CLI_LANGUAGE"
         shell: bash
+      - name: Verify native Windows system imports and actual retail static MSVC runtime
+        if: matrix.target == 'windows-x64' && matrix.language == 'cpp'
+        run: python scripts/check_windows_runtime.py
       - uses: actions/upload-artifact@v4
         with:
           name: cli-${{ matrix.target }}

@@ -109,6 +109,15 @@ helpers are never packaged. Follow [manual Windows acceptance](tests/manual-wind
 for mixed 100/125/150%, custom scaling, session changes, reconnects, negative
 coordinates and Remote Desktop.
 
+The native Windows job additionally runs `python scripts/check_windows_runtime.py`.
+It verifies the generated Release|x64 MSVC project selects retail static `/MT`,
+checks the actual compiled objects' `LIBCMT` directives, and uses the configured
+compiler's `dumpbin /DEPENDENTS` on the provenance-bound executable. Only the
+explicit Windows system DLL allowlist is accepted; dynamic/debug CRT or unexpected
+imports fail CI. Evidence (`runtime-status.json`, imports and object directives)
+is uploaded with `cli-windows-x64`. This is **not** a clean-machine deployment
+test or a legal certification of the publisher's Visual Studio license.
+
 Local macOS 4D source/compiler/compiled-package checks exercise protocol
 validation, generic execution and the unsupported-platform error, **not Windows
 monitor detection**. Development artifacts are not installable production
@@ -137,6 +146,13 @@ The release workflow is deliberately fail-closed until real Windows 4D source
 and compiled-package host acceptance is integrated. A green CLI job or macOS
 unsupported-backend host check is not release readiness. No release/tag is
 created by build or package commands.
+
+Concrete remaining automation blockers: `package.json.tool` pins only macOS ARM64
+tool4d 20.7/101905; the downloader enforces that native host, and the compiler driver
+builds ARM64 macOS libraries plus x64 generic code. There is no approved native
+Windows tool4d URL/SHA256 or Windows source/final-package host workflow. Reusing
+the macOS pin cannot execute a Windows host. No release/tag/asset exists for a
+real GitHub dependency-manager download, and publication is not authorized.
 
 ## Installation after an accepted release
 
