@@ -16,7 +16,7 @@ import stat
 import struct
 import zipfile
 
-from ci_config import ROOT, load_config
+from ci_config import ROOT, load_config, resource_targets
 from compile_component import input_digest, output_digest
 
 
@@ -38,13 +38,26 @@ def write_zip(stream, entries):
             archive.writestr(info, content, compresslevel=9)
 
 
-def validate_resources(component, cli):
+def validate_resources(component, cli, targets=None):
+    targets = tuple(targets) if targets is not None else ("macos-x64", "macos-arm64", "windows-x64")
     mac = component / "Resources" / "bin" / "macOS" / cli
     windows = component / "Resources" / "bin" / "Windows" / (cli + ".exe")
-    for path in (mac, windows):
+    paths = ([mac] if any(target.startswith("macos-") for target in targets) else [])
+    paths += [windows] if "windows-x64" in targets else []
+    for path in paths:
         if not path.is_file() or path.is_symlink():
             raise ValueError(f"missing regular native resource: {path}")
+    if not any(target.startswith("macos-") for target in targets):
+        validate_windows_resource(windows)
+        return tuple(paths)
     data = mac.read_bytes()
+    if len(targets) == 1 and targets[0].startswith("macos-"):
+        cpu = 0x0100000C if targets[0] == "macos-arm64" else 0x01000007
+        if (len(data) < 32 or data[:4] != b"\xcf\xfa\xed\xfe"
+                or struct.unpack_from("<I", data, 4)[0] != cpu
+                or struct.unpack_from("<I", data, 12)[0] != 2):
+            raise ValueError("development resource must be a matching native thin Mach-O executable")
+        return tuple(paths)
     if len(data) < 8 or data[:4] not in (b"\xca\xfe\xba\xbe", b"\xca\xfe\xba\xbf"):
         raise ValueError("macOS resource must be a universal Mach-O")
     wide = data[:4] == b"\xca\xfe\xba\xbf"
@@ -68,6 +81,11 @@ def validate_resources(component, cli):
         architectures.add(cpu)
     if architectures != {0x01000007, 0x0100000C}:
         raise ValueError("macOS resource must contain x86_64 and arm64")
+    validate_windows_resource(windows)
+    return mac, windows
+
+
+def validate_windows_resource(windows):
     data = windows.read_bytes()
     if len(data) < 64 or data[:2] != b"MZ":
         raise ValueError("Windows resource must be a PE executable")
@@ -76,7 +94,35 @@ def validate_resources(component, cli):
             or struct.unpack_from("<H", data, offset + 4)[0] != 0x8664
             or struct.unpack_from("<H", data, offset + 24)[0] != 0x20B):
         raise ValueError("Windows resource must have an x64 PE32+ header")
-    return mac, windows
+
+
+def validate_resource_provenance(root, component, config, targets, local_development):
+    from build_provenance import commit, sha256, source_digest
+    base = component / "Resources/bin"
+    marker = base / "resource-manifest.json"
+    if not marker.is_file() or marker.is_symlink():
+        raise ValueError("explicit resource scope requires assembled resource-manifest.json")
+    status = json.loads(marker.read_text())
+    profile = "development" if local_development else "production"
+    if (status.get("schema") != 1 or status.get("profile") != profile
+            or status.get("targets") != list(targets)
+            or not isinstance(status.get("builds"), list) or len(status["builds"]) != len(targets)):
+        raise ValueError("resource profile/targets do not match requested package")
+    resources = status.get("resources")
+    expected = ({f"macOS/{config['cli']}"} if local_development
+                else {f"Windows/{config['cli']}.exe"})
+    actual = {path.relative_to(base).as_posix() for path in base.rglob("*")
+              if path.is_file() and path != marker}
+    if not isinstance(resources, dict) or set(resources) != expected or actual != expected:
+        raise ValueError("resource scope contains missing or unexpected binaries")
+    for target, build in zip(targets, status["builds"]):
+        name = next(iter(expected))
+        if (build.get("schema") != 1 or build.get("target") != target
+                or build.get("source_sha256") != source_digest(root)
+                or build.get("commit") != commit(root) or build.get("execution") != "passed"
+                or build.get("binary_sha256") != resources[name]
+                or resources[name] != sha256(base / name)):
+            raise ValueError("stale or modified assembled resource provenance")
 
 
 def validate_compile(root, component, repository):
@@ -131,7 +177,7 @@ def include_project(relative):
     return False
 
 
-def package(root=ROOT, *, repository=None, tag=None, language=None):
+def package(root=ROOT, *, repository=None, tag=None, language=None, local_development=False):
     root = Path(root).resolve()
     repository = repository if repository is not None else os.environ.get("GITHUB_REPOSITORY")
     tag = tag if tag is not None else os.environ.get("GITHUB_REF_NAME")
@@ -143,7 +189,10 @@ def package(root=ROOT, *, repository=None, tag=None, language=None):
     component = root / "component" / config["repository"]
     if component.is_symlink() or component.parent.is_symlink():
         raise ValueError("component directories must not be symlinks")
-    validate_resources(component, config["cli"])
+    targets = resource_targets(config, local_development)
+    validate_resources(component, config["cli"], targets)
+    if config.get("resource_targets"):
+        validate_resource_provenance(root, component, config, targets, local_development)
     if config["language"] in RUNTIME_NOTICES:
         notice = component / "Resources/licenses" / RUNTIME_NOTICES[config["language"]]
         if not notice.is_file() or notice.is_symlink() or not notice.read_bytes().strip():
@@ -181,11 +230,17 @@ def package(root=ROOT, *, repository=None, tag=None, language=None):
     packed = io.BytesIO()
     write_zip(packed, project_entries)
     prefix = config["repository"] + ".4dbase/"
-    destination = root / "dist" / (config["repository"] + ".zip")
+    destination = root / "dist" / ("development" if local_development else "") / (config["repository"] + ".zip")
     if any(path.is_symlink() for path in [destination, *destination.parents]):
         raise ValueError("package destination must not traverse symlinks")
     destination.parent.mkdir(parents=True, exist_ok=True)
     entries = [(prefix + config["repository"] + ".4DZ", packed.getvalue(), 0o644)]
+    if local_development:
+        marker = {"schema": 1, "profile": "DEVELOPMENT", "release_ready": False,
+                  "production_platforms": ["Windows-x64"], "backend_targets": list(targets),
+                  "feature_support": False,
+                  "reason": "macOS backend returns UNSUPPORTED_PLATFORM; not a Windows production package"}
+        entries.append((prefix + "DEVELOPMENT.json", (json.dumps(marker, indent=2) + "\n").encode(), 0o644))
     for name, path in files:
         if name.startswith("Project/"):
             continue
@@ -242,9 +297,12 @@ def main():
     parser.add_argument("--language", choices=("go", "rust", "cpp"))
     parser.add_argument("--unpack-test", action="store_true",
                         help="also unpack the generated archive under build/release-test")
+    parser.add_argument("--local-development", action="store_true",
+                        help="native macOS unsupported-backend DEVELOPMENT ZIP; not production/release ready")
     args = parser.parse_args()
     try:
-        archive = package(args.root, repository=args.repository, tag=args.tag, language=args.language)
+        archive = package(args.root, repository=args.repository, tag=args.tag, language=args.language,
+                          local_development=args.local_development)
         print(unpack_for_test(args.root, archive) if args.unpack_test else archive)
     except (ValueError, OSError, TypeError, KeyError, struct.error) as error:
         parser.exit(2, f"component packaging failed: {error}\n")

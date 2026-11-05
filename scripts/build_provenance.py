@@ -32,20 +32,25 @@ def commit(root):
     return lines[1]
 
 
-def record(root, target, executable, tested, toolchain):
+def record(root, target, executable, tested, toolchain, helpers=None):
     status = {"schema": 1, "target": target, "source_sha256": source_digest(root),
               "commit": commit(root), "binary_sha256": sha256(executable),
               "execution": "passed" if tested else "not_run", "toolchain": toolchain}
+    if helpers:
+        status["test_helpers"] = {path.name: sha256(path) for path in helpers}
     executable.with_name("build-manifest.json").write_text(json.dumps(status, indent=2) + "\n")
     return status
 
 
 def verify(root, target, executable):
+    executable = Path(executable)
+    if (not executable.is_file() or any(path.is_symlink() for path in [executable, *executable.parents])):
+        raise ValueError("CLI build artifact must be a regular file without symlink traversal")
     manifest = executable.with_name("build-manifest.json")
     if not manifest.is_file() or manifest.is_symlink():
         raise ValueError("missing build-manifest.json; rebuild all targets from the current source")
     status = json.loads(manifest.read_text())
-    if (status.get("target") != target or status.get("source_sha256") != source_digest(root)
+    if (status.get("schema") != 1 or status.get("target") != target or status.get("source_sha256") != source_digest(root)
             or status.get("commit") != commit(root) or status.get("binary_sha256") != sha256(executable)):
         raise ValueError("stale or mixed-source CLI build manifest: " + target)
     return status

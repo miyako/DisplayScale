@@ -1,10 +1,24 @@
 {
   "schema": 1,
   "cases": [
-    {"args": ["--version"], "exitCode": 0, "stdout": {"protocol": 1, "version": "$VERSION"}, "stderr": ""},
-    {"args": ["greet", "--name", "世界 café"], "exitCode": 0, "stdout": {"protocol": 1, "message": "Hello, 世界 café!"}, "stderr": ""},
-    {"args": ["greet", "--name", "quote\" slash\\\n"], "exitCode": 0, "stdout": {"protocol": 1, "message": "Hello, quote\" slash\\\n!"}, "stderr": ""},
-    {"args": ["greet", "--name", ""], "exitCode": 2, "stdout": "", "stderr": {"protocol": 1, "error": {"code": "invalid_arguments", "message": "expected greet --name <non-empty UTF-8 name> or --version"}}},
-    {"args": ["unknown"], "exitCode": 2, "stdout": "", "stderr": {"protocol": 1, "error": {"code": "invalid_arguments", "message": "expected greet --name <non-empty UTF-8 name> or --version"}}}
+    {"platforms": ["Windows", "Darwin"], "args": ["--version"], "exitCode": 0, "stdout": {"protocol": 1, "version": "$VERSION"}, "stderr": ""},
+    {
+      "platforms": ["Windows"],
+      "args": ["monitors"],
+      "exitCode": 0,
+      "stdoutPattern": "\\{\"protocol\":1,\"monitors\":\\[\\{\"device\":\"(?:[^\"\\\\\\x00-\\x1f]|\\\\(?:[\"\\\\/bfnrt]|u[0-9a-fA-F]{4}))+\",\"primary\":true,\"bounds\":\\{\"left\":-?\\d+,\"top\":-?\\d+,\"right\":-?\\d+,\"bottom\":-?\\d+\\},\"dpi\":[1-9]\\d*,\"scalePercent\":\\d+(?:\\.\\d+)?\\}(?:,\\{\"device\":\"(?:[^\"\\\\\\x00-\\x1f]|\\\\(?:[\"\\\\/bfnrt]|u[0-9a-fA-F]{4}))+\",\"primary\":false,\"bounds\":\\{\"left\":-?\\d+,\"top\":-?\\d+,\"right\":-?\\d+,\"bottom\":-?\\d+\\},\"dpi\":[1-9]\\d*,\"scalePercent\":\\d+(?:\\.\\d+)?\\})*\\]\\}\\n",
+      "stderr": ""
+    },
+    {
+      "platforms": ["Darwin"],
+      "args": ["monitors"],
+      "exitCode": 3,
+      "stdout": "",
+      "stderr": {"protocol": 1, "error": {"code": "UNSUPPORTED_PLATFORM", "message": "monitors requires Windows 10 version 1703 or later on x64"}}
+    },
+    {"platforms": ["Windows", "Darwin"], "args": [], "exitCode": 2, "stdout": "", "stderr": {"protocol": 1, "error": {"code": "INVALID_ARGUMENTS", "message": "expected monitors or --version"}}},
+    {"platforms": ["Windows", "Darwin"], "args": ["monitors", "extra"], "exitCode": 2, "stdout": "", "stderr": {"protocol": 1, "error": {"code": "INVALID_ARGUMENTS", "message": "expected monitors or --version"}}},
+    {"platforms": ["Windows", "Darwin"], "args": ["unknown"], "exitCode": 2, "stdout": "", "stderr": {"protocol": 1, "error": {"code": "INVALID_ARGUMENTS", "message": "expected monitors or --version"}}},
+    {"platforms": ["Windows", "Darwin"], "args": ["世界 café 😀"], "exitCode": 2, "stdout": "", "stderr": {"protocol": 1, "error": {"code": "INVALID_ARGUMENTS", "message": "expected monitors or --version"}}}
   ]
 }

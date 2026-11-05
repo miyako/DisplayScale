@@ -19,6 +19,9 @@ def doctor(root=ROOT, tool4d=None):
               "repository": config["repository"], "language": config["language"],
               "host": {"system": platform.system(), "machine": platform.machine()},
               "checks": [], "release_ready": False}
+    report["resource_targets"] = config.get("resource_targets", ["macos-x64", "macos-arm64", "windows-x64"])
+    report["unsupported_backend_platforms"] = config.get("unsupported_backend_platforms", [])
+    report["local_development_only"] = platform.system() in report["unsupported_backend_platforms"]
     report["actual_repository"] = github_repository(root)
     if report["actual_repository"] is None and Path(root).resolve() == ROOT:
         report["actual_repository"] = os.environ.get("GITHUB_REPOSITORY")
@@ -45,11 +48,15 @@ def doctor(root=ROOT, tool4d=None):
         check("cli_source", source.is_dir() and not source.is_symlink(), str(source))
         compiler = Path(root) / "tooling/compiler/Project/compiler.4DProject"
         check("compiler_driver", compiler.is_file(), str(compiler))
+    artifact_paths = ["build/compile-status.json", "build/source-host-status.json",
+                      "build/compiled-host-status.json", f"dist/{config['repository']}.zip"]
+    if report["local_development_only"]:
+        artifact_paths.extend((f"dist/development/{config['repository']}.zip",
+                               f"dist/development/{config['repository']}.acceptance.json"))
     report["artifacts"] = [
         {"path": str(Path(root) / relative),
          "status": "present" if (Path(root) / relative).is_file() else "not_run"}
-        for relative in ("build/compile-status.json", "build/source-host-status.json",
-                         "build/compiled-host-status.json", f"dist/{config['repository']}.zip")]
+        for relative in artifact_paths]
     try:
         require_tool4d_host()
         check("pinned_tool4d_host", True, "macOS ARM64")
@@ -57,7 +64,7 @@ def doctor(root=ROOT, tool4d=None):
         check("pinned_tool4d_host", False, str(error))
     candidate = Path(tool4d) if tool4d else Path(root) / ".tools/tool4d.app/Contents/MacOS/tool4d"
     check("tool4d", candidate.is_file() and os.access(candidate, os.X_OK), str(candidate))
-    if platform.system() == "Darwin":
+    if platform.system() == "Darwin" and {"macos-x64", "macos-arm64"} <= set(report["resource_targets"]):
         check("lipo", shutil.which("lipo") is not None, "required for universal resource assembly")
     report["ready_for_local_acceptance"] = all(entry["status"] == "passed" for entry in report["checks"])
     return report

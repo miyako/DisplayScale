@@ -1,10 +1,13 @@
 {
   "schema": 1,
-  "initialized": false,
-  "repository": "4d-component-template",
-  "namespace": "TemplateCLI",
-  "cli": "component-cli",
-  "language": null,
-  "feature": "Deterministic UTF-8 greeting example",
-  "version": "0.1.0"
+  "initialized": true,
+  "repository": "DisplayScale",
+  "namespace": "DisplayScale",
+  "cli": "display-scale",
+  "language": "cpp",
+  "feature": "Read effective per-monitor display scaling on Windows 10 1703+ x64",
+  "version": "0.1.0",
+  "feature_class": "Display",
+  "resource_targets": ["windows-x64"],
+  "unsupported_backend_platforms": ["Darwin"]
 }

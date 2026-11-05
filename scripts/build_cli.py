@@ -31,12 +31,31 @@ def native_target():
     raise ValueError(f"unsupported native host: {system}/{machine}")
 
 
-def smoke_test(executable, version, contract, prefix=()):
+def smoke_test(executable, version, contract, prefix=(), unsupported_backend=False):
     data = json.loads(Path(contract).read_text(encoding="utf-8"))
     cases = data.get("cases") if isinstance(data, dict) else None
     if not isinstance(data, dict) or data.get("schema") != 1 or not isinstance(cases, list) or not cases:
         raise ValueError("CLI contract must contain schema:1 and nonempty cases")
-    if (not any(isinstance(case, dict) and case.get("exitCode") == 0
+    for case in cases:
+        if not isinstance(case, dict):
+            raise ValueError("invalid CLI contract case")
+        selectors = case.get("platforms") if isinstance(case, dict) else None
+        if selectors is not None and (not isinstance(selectors, list) or not selectors
+                or any(item not in ("Windows", "Darwin") for item in selectors)):
+            raise ValueError("CLI platforms must be a nonempty Windows/Darwin array")
+    cases = [case for case in cases if isinstance(case, dict)
+             and ("platforms" not in case or platform.system() in case["platforms"])]
+    if not cases:
+        raise ValueError("CLI contract has no vectors for this platform")
+    if unsupported_backend:
+        if (platform.system() != "Darwin"
+                or not any(case.get("args") == ["--version"] and case.get("exitCode") == 0 for case in cases)
+                or not any(type(case.get("exitCode")) is int and case["exitCode"] > 0
+                           and case.get("args") != ["--version"]
+                           and "UNSUPPORTED_PLATFORM" in json.dumps(case.get("stderr", case.get("stderrPattern", "")))
+                           for case in cases)):
+            raise ValueError("unsupported backend needs version success and explicit UNSUPPORTED_PLATFORM failure vectors")
+    elif (not any(isinstance(case, dict) and case.get("exitCode") == 0
                 and case.get("args") != ["--version"] for case in cases)
             or not any(isinstance(case, dict) and type(case.get("exitCode")) is int
                        and case["exitCode"] > 0 for case in cases)):
@@ -126,11 +145,22 @@ def build(root, target, language=None, cross=False):
         commands = [
             ["cmake", "-S", str(source), "-B", str(output / "cmake"),
              "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_CXX_STANDARD=17", "-DCMAKE_CXX_EXTENSIONS=OFF",
+             *(["-DBUILD_TESTING=ON"] if config.get("resource_targets") == ["windows-x64"] else []),
              *architecture_options],
             ["cmake", "--build", str(output / "cmake"), "--config", "Release"],
         ]
     for command in commands:
         subprocess.run(command, cwd=source, env=env, check=True, timeout=600)
+    if selected == "cpp":
+        compiler_files = sorted((output / "cmake/CMakeFiles").glob("*/CMakeCXXCompiler.cmake"))
+        if not compiler_files:
+            raise ValueError("CMake did not record C++ compiler identity")
+        compiler = compiler_files[-1].read_text(encoding="utf-8")
+        identity = re.search(r'set\(CMAKE_CXX_COMPILER_ID "([^"]+)"\)', compiler)
+        version = re.search(r'set\(CMAKE_CXX_COMPILER_VERSION "([^"]+)"\)', compiler)
+        if not identity or not version:
+            raise ValueError("CMake C++ compiler identity/version is missing")
+        toolchain = identity[1] + " " + version[1]
     if target == native:
         if selected == "go":
             subprocess.run(["go", "test", "./..."], cwd=source, env=env, check=True, timeout=600)
@@ -156,8 +186,29 @@ def build(root, target, language=None, cross=False):
         contract = root / "tests/cli-contract.json"
         if not contract.is_file():
             raise ValueError("tests/cli-contract.json is required; define feature smoke vectors")
-        smoke_test(executable, config["version"], contract)
-    record(root, target, executable, target == native, toolchain)
+        smoke_test(executable, config["version"], contract,
+                   unsupported_backend=platform.system() in config.get("unsupported_backend_platforms", []))
+    helpers = []
+    if selected == "cpp" and target == native and config.get("resource_targets") == ["windows-x64"]:
+        helper_name = config["cli"] + "-test-echo" + (".exe" if target == "windows-x64" else "")
+        candidates = [output / "cmake" / helper_name, output / "cmake/Release" / helper_name]
+        helper = next((path for path in candidates if path.is_file() and not path.is_symlink()), None)
+        if helper is None:
+            raise ValueError("native host acceptance requires the isolated test-only echo target")
+        destination = output / helper_name
+        if destination.is_symlink():
+            raise ValueError("test helper destination must not be a symlink")
+        shutil.copyfile(helper, destination)
+        destination.chmod(0o755)
+        argument = "日本語 ' \" C:\\quoted path\\"
+        result = subprocess.run([str(destination), argument], capture_output=True, check=True, timeout=20)
+        expected = (json.dumps({"protocol": 1, "arguments": [argument]}, ensure_ascii=False, separators=(",", ":")) + "\n").encode()
+        if result.stdout != expected or result.stderr:
+            raise ValueError("isolated echo helper failed its native UTF-8/quote round trip")
+        helpers.append(destination)
+    if source_digest(root) != original_digest:
+        raise ValueError("CLI inputs changed during native helper tests")
+    record(root, target, executable, target == native, toolchain, helpers=helpers)
     return executable
 
 

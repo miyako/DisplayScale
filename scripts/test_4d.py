@@ -9,6 +9,10 @@ import subprocess
 import sys
 import shutil
 import uuid
+import platform
+import math
+from build_cli import native_target
+from build_provenance import sha256, verify
 
 
 def _pointer(value, path):
@@ -37,14 +41,18 @@ def _equal(actual, expected):
     return actual == expected
 
 
+def _finite_number(value):
+    return type(value) in (int, float) and (type(value) is int or math.isfinite(value))
+
+
 def _assertions(value, assertions):
     if not isinstance(assertions, list):
         raise ValueError("contract assertions must be an array")
     for assertion in assertions:
         if not isinstance(assertion, dict) or "path" not in assertion or not (
-                set(assertion) & {"equals", "length", "each", "absent", "matches"}):
+                set(assertion) & {"equals", "length", "each", "absent", "matches", "numeric", "approximately"}):
             raise ValueError("invalid host contract assertion")
-        if set(assertion) - {"path", "equals", "length", "each", "absent", "matches"}:
+        if set(assertion) - {"path", "equals", "length", "each", "absent", "matches", "numeric", "approximately", "tolerance"}:
             raise ValueError("unknown host contract assertion field")
         path = assertion["path"]
         if "absent" in assertion:
@@ -58,6 +66,21 @@ def _assertions(value, assertions):
                 raise
             raise ValueError("host contract path must be absent: " + path)
         actual = _pointer(value, path)
+        if "numeric" in assertion and (assertion["numeric"] is not True
+                or not _finite_number(actual)):
+            raise ValueError("host numeric assertion requires a finite JSON number: " + path)
+        if "approximately" in assertion or "tolerance" in assertion:
+            expected = assertion.get("approximately")
+            tolerance = assertion.get("tolerance")
+            if (not _finite_number(actual) or not _finite_number(expected)
+                    or not _finite_number(tolerance) or tolerance < 0):
+                raise ValueError("host approximate assertion requires finite numbers and nonnegative tolerance: " + path)
+            try:
+                difference = abs(actual - expected)
+            except OverflowError as error:
+                raise ValueError("host approximate value is out of numeric range: " + path) from error
+            if difference > tolerance:
+                raise ValueError("host approximate value mismatch: " + path)
         if "equals" in assertion and not _equal(actual, assertion["equals"]):
             raise ValueError("host contract value mismatch: " + path)
         if "matches" in assertion:
@@ -94,6 +117,24 @@ def _success_result(result, feature=False):
         raise ValueError("host feature success result requires a value")
 
 
+def platform_contract(contract, system=None):
+    if not isinstance(contract, dict):
+        raise ValueError("unsupported host contract schema")
+    overrides = contract.get("platforms")
+    if overrides is None:
+        return contract
+    if (not isinstance(overrides, dict) or not overrides
+            or set(overrides) - {"Windows", "Darwin"}):
+        raise ValueError("host platforms must declare Windows/Darwin overrides")
+    selected_system = system or platform.system()
+    if selected_system not in ("Windows", "Darwin"):
+        raise ValueError("host contract platform is unsupported")
+    selected = overrides.get(selected_system, {})
+    if not isinstance(selected, dict) or set(selected) - {"feature", "execution"}:
+        raise ValueError("host contract has no valid overrides for this platform")
+    return {**contract, **selected}
+
+
 def validate_status(status, contract, expect_compiled):
     """Validate reusable completion/results and fixture-owned JSON assertions."""
     if (not isinstance(status, dict) or status.get("success") is not True
@@ -102,6 +143,7 @@ def validate_status(status, contract, expect_compiled):
         raise ValueError("4D host requires success:true, finished:true and exact compiled mode")
     if not isinstance(contract, dict) or type(contract.get("schema")) is not int or contract["schema"] != 1:
         raise ValueError("unsupported host contract schema")
+    contract = platform_contract(contract)
     feature = contract.get("feature")
     execution = contract.get("execution")
     if not isinstance(feature, dict) or not isinstance(execution, dict):
@@ -208,19 +250,36 @@ def test_4d(root, tool4d, component=None):
         if component is None:
             ignored.append("DerivedData")
         shutil.copytree(source, package, ignore=shutil.ignore_patterns(*ignored))
-        platform = "Windows" if os.name == "nt" else "macOS"
+        resource_platform = "Windows" if os.name == "nt" else "macOS"
         executable_name = config["cli"] + (".exe" if os.name == "nt" else "")
-        native = package / "Resources/bin" / platform / executable_name
+        native = package / "Resources/bin" / resource_platform / executable_name
         if not native.is_file() or native.is_symlink():
             raise ValueError("host test needs the configured native CLI resource")
         executable = host / (_host_path_prefix("renamed executable") + (".exe" if os.name == "nt" else ""))
         shutil.copy2(native, executable)
         executable.chmod(0o755)
+        request_values = {"status": str(host / (_host_path_prefix("host status") + ".json")),
+                          "expectCompiled": component is not None, "executable": str(executable),
+                          "platform": platform.system()}
+        if config.get("resource_targets") == ["windows-x64"]:
+            target = native_target()
+            name = config["cli"] + "-test-echo" + (".exe" if os.name == "nt" else "")
+            build_executable = root / "build" / target / executable_name
+            manifest = verify(root, target, build_executable)
+            helper = root / "build" / target / name
+            _no_symlinks(helper)
+            helpers = manifest.get("test_helpers")
+            if (not helper.is_file() or manifest.get("execution") != "passed"
+                    or not isinstance(helpers, dict) or helpers.get(name) != sha256(helper)
+                    or manifest["binary_sha256"] != sha256(native)):
+                raise ValueError("fresh same-source native test-only echo helper is required")
+            echo = host / (_host_path_prefix("isolated echo helper") + (".exe" if os.name == "nt" else ""))
+            shutil.copy2(helper, echo)
+            echo.chmod(0o755)
+            request_values["echo"] = str(echo)
         request = host / (_host_path_prefix("host request") + ".json")
         staged_output = host / (_host_path_prefix("host status") + ".json")
-        request.write_text(json.dumps({"status": str(staged_output),
-                                      "expectCompiled": component is not None,
-                                      "executable": str(executable)}, ensure_ascii=False) + "\n",
+        request.write_text(json.dumps(request_values, ensure_ascii=False) + "\n",
                            encoding="utf-8")
         subprocess.run([str(Path(tool4d).resolve()), str(host / "Project" / "Host.4DProject"),
                         "--skip-onstartup", "--startup-method=Smoke", "--dataless",

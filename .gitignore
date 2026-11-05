@@ -6,6 +6,8 @@ cli/target/
 cli/build/
 component/*/DerivedData/
 component/*/Project/DerivedData/
+tooling/compiler/Project/DerivedData/
+tooling/compiler/Project/Sources/catalog.4DCatalog
 component/*/Libraries/lib4d-*
 userPreferences.*/
 component/*/Data/

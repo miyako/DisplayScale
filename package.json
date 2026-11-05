@@ -1,8 +1,8 @@
 {
-  "name": "4d-component-template",
+  "name": "DisplayScale",
   "version": "0.1.0",
   "private": true,
-  "description": "Deterministic UTF-8 greeting example",
+  "description": "Read effective per-monitor display scaling on Windows 10 1703+ x64",
   "license": "MIT",
   "tool": {
     "platform": "macos",
