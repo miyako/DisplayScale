@@ -464,6 +464,21 @@ python3 scripts/test_4d.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/to
 6. Recompile/repack/retest after any input or signing change. Never accept a
    stale `host-status.json` or result describing a different package.
 
+**Headless first-open "import components" dialog.** When 4D opens a project
+for the first time and that project has no `Project/Sources/dependencies.json`,
+it can show a modal "import components" dialog. Headless tool4d/4D runs (e.g.
+`--startup-method=Compile`) then block indefinitely until a person declines it;
+this was observed with 4D 21.0 opening `tooling/compiler/Project/compiler.4DProject`
+on Windows (issue #2). Prevent it by placing `Project/Sources/dependencies.json`
+**before** the project's first open, rather than relying on dismissal or timeouts.
+Existing examples: `tests/host/Project/Sources/dependencies.json` is
+`{"version":2100,"dependencies":{"DisplayScale":{}}}` and
+`component/DisplayScale/Project/Sources/dependencies.json` is
+`{"version":2100,"dependencies":{}}`, as is `tooling/compiler/Project/Sources/dependencies.json`. Any new or generated helper project
+(compiler, host fixture or staging copy) needs one, declaring only the
+components it really loads. A hang at first open is a dialog symptom, not a
+compiler or quoting failure.
+
 The isolated host's `Host_error` method writes raw `Last errors`, the failing
 phase, `success:false` and `finished:false` on an unexpected runtime abort.
 It uses/restores a local handler; it is not a permanent host-global component
@@ -615,6 +630,7 @@ cross-build or optional skipped workflow as passed.
 | Compiled loader crash / interpreted package | Verify explicit nested ZIP directory records, external native Libraries, source stripping and exact `Is compiled mode`; keep the established packer. |
 | Tool download/checksum/config failure | Check `package.json.tool` or complete overrides, official fixed URL and independently approved SHA256; do not fall back to `latest`, bypass the hash or redistribute vendor tools. |
 | Final host unfinished/failed | Stop and preserve status/phase/errors. A previous ZIP, successful compile or six completed cases cannot approve this run. |
+| Headless 4D hangs on first project open | Check for a modal "import components" dialog; ensure `Project/Sources/dependencies.json` exists before first open (§6). Do not add a dismissal hack or treat the hang as a compile failure. |
 
 ## 8. Icons, licensing and optional signing
 

@@ -41,6 +41,10 @@ scripts/tests. Resolve all paths below from the repository root, not this folder
    Without `--cross`, all three current artifacts/manifests are still needed.
    For Rust/C++, restore binaries plus `build-manifest.json` from same-commit
    native CI into `build/<target>/`; never mix stale or changed inputs/outputs.
+   Every 4D project opened headlessly (compiler, host fixture, staged copies)
+   must already contain `Project/Sources/dependencies.json` before its first
+   open; otherwise 4D may show a modal "import components" dialog that blocks
+   the run indefinitely. See AGENTS.md §6 for the observed case and examples.
 7. **Report:** identify exact revision/platform/tools, commands, artifact/evidence
    paths, `passed` / `failed` / `not_run` per check and blockers. Partial local success
    is **NOT release ready**. Do not publish or add credentials without approval.
