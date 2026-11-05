@@ -474,7 +474,7 @@ on Windows (issue #2). Prevent it by placing `Project/Sources/dependencies.json`
 Existing examples: `tests/host/Project/Sources/dependencies.json` is
 `{"version":2100,"dependencies":{"DisplayScale":{}}}` and
 `component/DisplayScale/Project/Sources/dependencies.json` is
-`{"version":2100,"dependencies":{}}`. Any new or generated helper project
+`{"version":2100,"dependencies":{}}`, as is `tooling/compiler/Project/Sources/dependencies.json`. Any new or generated helper project
 (compiler, host fixture or staging copy) needs one, declaring only the
 components it really loads. A hang at first open is a dialog symptom, not a
 compiler or quoting failure.
