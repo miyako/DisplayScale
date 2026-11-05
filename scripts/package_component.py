@@ -21,6 +21,14 @@ from compile_component import input_digest, output_digest
 
 
 COMPILE_TARGETS = {"x86_64_generic", "arm64_macOS_lib"}
+WINDOWS_COMPILE_TARGETS = {"x86_64_generic"}
+
+
+def allowed_compile_targets(config):
+    """Windows-only components may be compiled by native Windows tool4d, which emits x86_64 only."""
+    if tuple(resource_targets(config)) == ("windows-x64",):
+        return (COMPILE_TARGETS, WINDOWS_COMPILE_TARGETS)
+    return (COMPILE_TARGETS,)
 RUNTIME_NOTICES = {"go": "Go-LICENSE.txt", "rust": "Rust-LICENSE-MIT.txt"}
 EXCLUDED = {"data", "logs", ".git", ".ds_store", "__macosx"}
 
@@ -132,8 +140,9 @@ def validate_compile(root, component, repository):
     status = json.loads(marker.read_text(encoding="utf-8"))
     project = component / "Project" / (repository + ".4DProject")
     if (status.get("success") is not True or not isinstance(status.get("targets"), list)
-            or set(status["targets"]) != COMPILE_TARGETS):
-        raise ValueError("compile marker must confirm success for both required targets")
+            or len(set(status["targets"])) != len(status["targets"])
+            or set(status["targets"]) not in allowed_compile_targets(load_config(root, initialized=True))):
+        raise ValueError("compile marker must confirm success for the required targets")
     marked_project = status.get("project")
     if not isinstance(marked_project, str):
         raise ValueError("compile marker must identify the project path")
@@ -147,10 +156,9 @@ def validate_compile(root, component, repository):
     if not project.is_file():
         raise ValueError("configured .4DProject is missing")
     compiled = project.parent / "DerivedData" / "CompiledCode"
-    required = [
-        component / "Libraries" / "lib4d-arm64.dylib",
-        compiled / "classes.json", compiled / "map.json",
-    ]
+    required = [compiled / "classes.json", compiled / "map.json"]
+    if "arm64_macOS_lib" in status["targets"]:
+        required.append(component / "Libraries" / "lib4d-arm64.dylib")
     for path in required:
         if not path.is_file() or path.is_symlink() or path.stat().st_size == 0:
             raise ValueError(f"required compiled artifact is missing or empty: {path.relative_to(component)}")

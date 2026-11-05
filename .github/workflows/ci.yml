@@ -113,6 +113,54 @@ jobs:
           path: ${{ steps.assemble.outputs.resources }}
           if-no-files-found: error
           retention-days: 7
+  windows-host:
+    needs: [configuration, native]
+    if: needs.configuration.outputs.initialized == 'true' && vars.FOURD_ENABLED == 'true' && github.ref_type != 'tag' && !inputs.release_call
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: bash
+    env:
+      TOOL4D_URL: ${{ vars.TOOL4D_URL }}
+      TOOL4D_SHA256: ${{ vars.TOOL4D_SHA256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-windows-x64
+          path: build/windows-x64
+      - name: Download pinned free native Windows x64 tool4D
+        run: python scripts/ci_config.py download-tool4d
+      - name: Source host, x86_64 compile, package and final compiled-ZIP host on native Windows 4D
+        run: >-
+          python scripts/accept_hosted.py --repository "$GITHUB_REPOSITORY"
+          --tool4d .tools/tool4d/tool4d.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compiled-component
+          path: |
+            dist/*.zip
+            dist/*.acceptance.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Retain source, compiler and final-host diagnostics even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: component-acceptance-diagnostics
+          path: |
+            build/hosted-acceptance.json
+            build/source-host-status.json
+            build/compile-status.json
+            build/compiled-host-status.json
+            build/host-status.json
+          if-no-files-found: warn
+          retention-days: 30
   development-host:
     needs: [configuration, native]
     if: needs.configuration.outputs.initialized == 'true' && vars.FOURD_ENABLED == 'true' && github.ref_type != 'tag' && !inputs.release_call

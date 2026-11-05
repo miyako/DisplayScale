@@ -149,10 +149,21 @@ def assemble(root=ROOT, local_development=False):
     return destination
 
 
+def tar_mode(archive):
+    """4D's Windows tool4d_win.tar.xz is bzip2-compressed; accept only xz or bzip2."""
+    with open(archive, "rb") as stream:
+        magic = stream.read(6)
+    if magic == b"\xfd7zXZ\x00":
+        return "r:xz"
+    if magic[:3] == b"BZh":
+        return "r:bz2"
+    raise ValueError("tool4D archive must be ZIP, TAR.XZ or TAR.BZ2")
+
+
 def extract_tar(archive, tools):
     """Extract regular files first, then validated app-framework symlinks."""
     base = tools.resolve()
-    with tarfile.open(archive, "r:xz") as packed:
+    with tarfile.open(archive, tar_mode(archive)) as packed:
         members = packed.getmembers()
         links = {}
         destinations = set()
@@ -201,29 +212,57 @@ def extract_tar(archive, tools):
             raise
 
 
+TOOL4D_HOSTS = {
+    # host: (package.json key, platform, arch, URL os segment, archive name, executable path)
+    "macos-arm64": ("tool", "macos", "arm", "mac", "tool4d_arm64.tar.xz",
+                    ("tool4d.app", "Contents", "MacOS", "tool4d")),
+    "windows-x64": ("tool_windows", "win", "x64", "win", "tool4d_win.tar.xz",
+                    ("tool4d", "tool4d.exe")),
+}
+
+
 def require_tool4d_host():
-    if platform.system() != "Darwin" or platform.machine().lower() not in {"arm64", "aarch64"}:
-        raise ValueError("pinned tool4d is macOS ARM64 only; use a matching Apple Silicon host")
+    """Return the native tool4d host; emulated/translated hosts are rejected."""
+    system = platform.system()
+    machine = platform.machine().lower()
+    if system == "Darwin" and machine in {"arm64", "aarch64"}:
+        return "macos-arm64"
+    if system == "Windows":
+        from build_cli import native_target
+        try:
+            if native_target() == "windows-x64":
+                return "windows-x64"
+        except ValueError:
+            pass
+    raise ValueError("pinned tool4d requires native macOS ARM64 or native Windows x64")
 
 
-def tool_pin(root=ROOT):
+def tool4d_executable(root=ROOT, host=None):
+    host = host or require_tool4d_host()
+    return Path(root) / ".tools" / Path(*TOOL4D_HOSTS[host][5])
+
+
+def tool_pin(root=ROOT, host="macos-arm64"):
     """Derive the official URL from versioned public metadata, not mutable latest."""
+    if host not in TOOL4D_HOSTS:
+        raise ValueError("unsupported tool4d host: " + str(host))
+    key, platform_name, arch, segment, filename, _ = TOOL4D_HOSTS[host]
     manifest = json.loads((Path(root) / "package.json").read_text(encoding="utf-8"))
-    tool = manifest.get("tool")
+    tool = manifest.get(key)
     if not isinstance(tool, dict):
-        raise ValueError("package.json.tool must specify the approved compiler build and SHA256")
-    if (tool.get("platform") != "macos" or tool.get("arch") != "arm"
+        raise ValueError(f"package.json.{key} must specify the approved compiler build and SHA256")
+    if (tool.get("platform") != platform_name or tool.get("arch") != arch
             or not isinstance(tool.get("branch"), str) or not re.fullmatch(r"[0-9]+\.x", tool["branch"])
             or not isinstance(tool.get("version"), str) or not re.fullmatch(r"[0-9]+\.[0-9]+", tool["version"])
             or not isinstance(tool.get("build"), str) or not re.fullmatch(r"[1-9][0-9]*", tool["build"])
             or not isinstance(tool.get("sha256"), str) or not re.fullmatch(r"[0-9a-fA-F]{64}", tool["sha256"])):
-        raise ValueError("package.json.tool requires fixed numeric build, macos/arm and a 64-hex SHA256")
+        raise ValueError(f"package.json.{key} requires fixed numeric build, {platform_name}/{arch} and a 64-hex SHA256")
     url = (f"https://resources-download.4d.com/release/{tool['branch']}/"
-           f"{tool['version']}/{tool['build']}/mac/tool4d_arm64.tar.xz")
+           f"{tool['version']}/{tool['build']}/{segment}/{filename}")
     return url, tool["sha256"].lower()
 
 
-def resolve_tool_pin(root=ROOT, *, url=None, digest=None):
+def resolve_tool_pin(root=ROOT, *, url=None, digest=None, host="macos-arm64"):
     if url is not None or digest is not None:
         if not url or not digest:
             raise ValueError("--url and --sha256 must be supplied together and nonempty")
@@ -234,7 +273,7 @@ def resolve_tool_pin(root=ROOT, *, url=None, digest=None):
         if not env_url or not env_digest:
             raise ValueError("TOOL4D_URL and TOOL4D_SHA256 overrides must be supplied together")
         return checked_tool_pin(env_url, env_digest)
-    return checked_tool_pin(*tool_pin(root))
+    return checked_tool_pin(*tool_pin(root, host))
 
 
 def checked_tool_pin(url, digest):
@@ -268,10 +307,11 @@ def open_tool4d_url(url):
     return urllib.request.build_opener(Tool4DRedirectHandler()).open(url, timeout=120)
 
 
-def download_tool4d(root=ROOT, *, url=None, digest=None):
-    """Download a concrete, SHA-256-pinned HTTPS TAR.XZ or ZIP app archive."""
+def download_tool4d(root=ROOT, *, url=None, digest=None, host="macos-arm64"):
+    """Download a concrete, SHA-256-pinned HTTPS TAR.XZ/TAR.BZ2 or ZIP archive."""
     root = Path(root).resolve()
-    url, digest = resolve_tool_pin(root, url=url, digest=digest)
+    url, digest = resolve_tool_pin(root, url=url, digest=digest, host=host)
+    top, *inner = TOOL4D_HOSTS[host][5]
     tools = root / ".tools"
     if any(path.is_symlink() for path in [tools, *tools.parents]):
         raise ValueError(".tools must not be a symlink")
@@ -299,23 +339,23 @@ def download_tool4d(root=ROOT, *, url=None, digest=None):
                 extract_tar(archive, stage)
             else:
                 extract_zip(archive, stage)
-            app = stage / "tool4d.app"
-            executable = app / "Contents" / "MacOS" / "tool4d"
+            app = stage / top
+            executable = app.joinpath(*inner)
             if not executable.is_file() or executable.is_symlink():
-                raise ValueError("archive must contain tool4d.app/Contents/MacOS/tool4d")
+                raise ValueError("archive must contain " + "/".join((top, *inner)))
             executable.chmod(0o755)
-            installed = tools / "tool4d.app"
+            installed = tools / top
             if installed.is_symlink():
-                raise ValueError("installed tool4d.app must not be a symlink")
+                raise ValueError(f"installed {top} must not be a symlink")
             if installed.exists():
-                raise ValueError("tool4d.app already exists; inspect/remove only that app before reinstalling")
+                raise ValueError(f"{top} already exists; inspect/remove only that tool before reinstalling")
             app.rename(installed)
         (tools / "tool4d-install.json").write_text(json.dumps({
-            "url": url, "sha256": sha.hexdigest(), "host": "macOS-arm64",
+            "url": url, "sha256": sha.hexdigest(), "host": host,
         }, indent=2) + "\n", encoding="utf-8")
     finally:
         archive.unlink(missing_ok=True)
-    return installed / "Contents" / "MacOS" / "tool4d"
+    return installed.joinpath(*inner)
 
 
 def extract_zip(archive, tools):
@@ -358,8 +398,8 @@ def main():
     args = parser.parse_args()
     try:
         if args.command == "download-tool4d":
-            require_tool4d_host()
-            print(download_tool4d(args.root, url=args.url, digest=args.sha256))
+            host = require_tool4d_host()
+            print(download_tool4d(args.root, url=args.url, digest=args.sha256, host=host))
             return
         if args.release and not os.environ.get("GITHUB_REPOSITORY"):
             raise ValueError("GITHUB_REPOSITORY is required for release validation")
@@ -370,7 +410,8 @@ def main():
         if args.release and os.environ.get("FOURD_ENABLED") != "true":
             raise ValueError("releases require FOURD_ENABLED=true")
         if args.release and config.get("resource_targets") == ["windows-x64"]:
-            raise ValueError("release blocked: pinned Windows 4D runtime and real source/compiled package host acceptance are unavailable")
+            # Windows-only releases are compiled and host-accepted by native Windows x64 tool4d.
+            tool_pin(args.root, "windows-x64")
         if args.local_development and args.command != "assemble":
             raise ValueError("--local-development applies only to assemble")
         if args.command == "matrix":

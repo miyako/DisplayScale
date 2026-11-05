@@ -147,22 +147,28 @@ attempt. The ZIP includes an explicit DEVELOPMENT marker and no Windows
 resource. It is **not** the production `dist/DisplayScale.zip` and remains
 `release_ready:false`. No C++ cross-build is attempted.
 
-The Publish workflow is deliberately fail-closed until real Windows 4D source
-and compiled-package host acceptance is integrated. A green CLI job or macOS
-unsupported-backend host check is not release readiness. No release/tag is
-created by build or package commands.
+Native Windows 4D acceptance uses the free fixed tool4d
+`package.json.tool_windows` pin (20.7 build 101905, Windows x64, SHA256-verified
+`win/tool4d_win.tar.xz`, a bzip2 TAR despite its name). The downloader requires a
+**native** Windows x64 host (ARM64 emulation is rejected) and installs
+`.tools/tool4d/tool4d.exe`. On Windows the compiler driver builds
+`x86_64_generic` only, because Windows 4D cannot link `arm64_macOS_lib`
+([#2](https://github.com/miyako/DisplayScale/issues/2)); the packager and release
+verifier accept that x86_64-only target set only for this Windows-only
+configuration and only with native Windows host evidence (`windows_4d` passed).
 
-Concrete remaining automation blockers: `package.json.tool` pins only macOS ARM64
-tool4d 20.7/101905; the downloader enforces that native host, and the compiler driver
-builds ARM64 macOS libraries plus x64 generic code. There is no approved native
-Windows tool4d URL/SHA256 or Windows source/final-package host workflow. Reusing
-the macOS pin cannot execute a Windows host. No release/tag/asset exists for a
-real GitHub dependency-manager download, and publication is not authorized.
-Windows 4D 21.0 cannot link the `arm64_macOS_lib` target that
-`compile_component.py`, `tooling/compiler` and the packager require, so a
-Windows compile path also needs target-aware changes. See
-[#2](https://github.com/miyako/DisplayScale/issues/2) for emulated (Windows
-ARM64) diagnostics; those are not native x64 acceptance.
+```sh
+python scripts/ci_config.py download-tool4d --root .
+python scripts/accept_hosted.py --root . --repository miyako/DisplayScale \
+  --tool4d .tools/tool4d/tool4d.exe
+```
+
+`accept_hosted.py` needs the same-revision `build/windows-x64` CLI and manifest,
+then runs real source host tests, compilation, packaging and the unpacked
+compiled-ZIP host test. Physical mixed-scale/RDP topologies
+([manual checks](tests/manual-windows.md)) and Dependency-manager installation
+remain separate, `not_run` acceptance. No release/tag is created by build or
+package commands.
 
 ### Running workflows from the Actions tab
 
@@ -170,22 +176,20 @@ Both workflows are started with **Actions → Run workflow**:
 
 * **CI** (any branch): configuration and Python checks, the native Windows x64
   CLI build/tests and runtime-import check, and production resource assembly.
-  The optional macOS development-backend 4D job runs only with the repository
-  variable `FOURD_ENABLED=true`. Green CI is CLI/resource evidence, not Windows
-  4D host evidence.
+  With the repository variable `FOURD_ENABLED=true`, the `windows-host` job
+  (native `windows-2022`) runs source host, x86_64 compile, packaging and the
+  unpacked compiled-ZIP host test, retaining `compiled-component` for 30 days
+  without publication; the macOS development-backend job also runs.
 * **Publish** (`main` only): choose **patch**, **minor** or **major**. The
   next version is computed from the highest stable `v*` tag (with none, from
   `package.json.version`; patch would yield `0.1.1`). The workflow stages the
   version surfaces (`scripts/bump_release.py`), then validates before
-  committing anything. Today every run stops in the `version` job at
-  *Fail closed pending pinned Windows runtime…*, because
-  `ci_config.py validate --release` requires `FOURD_ENABLED=true` and rejects a
-  Windows x64-only release until the blockers above are resolved. Such a run
-  makes no commit, tag or release.
-
-  After the gate is lifted, Publish commits the version bump to `main`, builds
-  the Windows CLI from that exact SHA, compiles and host-tests the unpacked
-  package, then creates the tag and release only after final asset
+  committing anything: `ci_config.py validate --release` requires
+  `FOURD_ENABLED=true` and a valid native Windows x64 tool4d pin, otherwise the
+  run stops with no commit, tag or release. Publish then commits the version
+  bump to `main`, builds the Windows CLI from that exact SHA, and on native
+  `windows-2022` host-tests the source, compiles, packages and host-tests the
+  unpacked compiled ZIP; it creates the tag and release only after final asset
   validation. Apple signing/notarization does not apply: the workflow uses no
   Apple secrets and rejects a `release-policy.json` that would require it.
 ## Installation after an accepted release

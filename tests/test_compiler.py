@@ -35,11 +35,18 @@ class CompilerTests(unittest.TestCase):
         self.assertFalse((self.project.parent.parent / "Libraries").exists())
 
     def result(self, args, **kwargs):
-        self.status.write_text(json.dumps({"success": True, "project": self.project.as_posix(),
-                                         "targets": ["x86_64_generic", "arm64_macOS_lib"]}))
         self.assertNotIn("shell", kwargs)
         self.assertIn("--startup-method=Compile", args)
-        self.assertTrue(any(a.startswith("--user-param=") for a in args))
+        parameter = [a for a in args if a.startswith("--user-param=")]
+        self.assertEqual(len(parameter), 1)
+        request = json.loads(Path(parameter[0].split("=", 1)[1]).read_text(encoding="utf-8"))
+        self.assertEqual(request["targets"], compiler.compile_targets())
+        self.status.write_text(json.dumps({"success": True, "project": self.project.as_posix(),
+                                         "targets": request["targets"]}))
+
+    def test_windows_compiles_x86_64_only_and_macos_both_targets(self):
+        self.assertEqual(compiler.compile_targets("Windows"), ["x86_64_generic"])
+        self.assertEqual(compiler.compile_targets("Darwin"), ["x86_64_generic", "arm64_macOS_lib"])
 
     def test_real_result_required_and_stale_status_removed(self):
         self.status.parent.mkdir()
@@ -80,6 +87,13 @@ class CompilerTests(unittest.TestCase):
         def wrong(*args, **kwargs):
             self.status.write_text('{"success":true,"project":"wrong","targets":["x86_64_generic"]}')
         with patch.object(compiler.subprocess, "run", side_effect=wrong):
+            with self.assertRaisesRegex(ValueError, "required project and targets"):
+                compiler.compile_component(self.root, "/fake/tool4d")
+
+        def other_targets(*args, **kwargs):
+            self.status.write_text(json.dumps({"success": True, "project": self.project.as_posix(),
+                                               "targets": ["arm64_macOS_lib"]}))
+        with patch.object(compiler.subprocess, "run", side_effect=other_targets):
             with self.assertRaisesRegex(ValueError, "required project and targets"):
                 compiler.compile_component(self.root, "/fake/tool4d")
 

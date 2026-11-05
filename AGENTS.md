@@ -14,19 +14,22 @@ Production resources are Windows-only; local development packaging must be
 explicitly selected and cannot approve a production release. Preserve all
 same-source/provenance, real compiler, source-stripping and final unpacked-host
 gates. Windows CLI CI, Windows 4D host acceptance and physical/manual topology
-acceptance are distinct. Release publication remains blocked until the required
-Windows host integration exists; never substitute macOS error-path checks.
+acceptance are distinct. Windows 4D host acceptance runs on native `windows-2022`
+with the pinned `package.json.tool_windows` tool4d (x86_64-only compile); never
+substitute macOS error-path checks or ARM64-emulated Windows runs.
 
 The template's patch/minor/major **Publish** workflow is ported with these
 DisplayScale deviations, which override the generic Publish text below:
-`ci.yml` has no `accept_hosted.py` job (only the optional macOS development
-backend); Publish fails closed in its `version` job at
-`ci_config.py validate --release`, before any commit, tag or release; it has
+`ci.yml` runs `accept_hosted.py` only in its native Windows `windows-host` job
+(plus the optional macOS development backend); Publish's `version` job requires
+`FOURD_ENABLED=true` and the Windows tool4d pin at
+`ci_config.py validate --release`, before any commit, tag or release, and its
+`compile` job runs on `windows-2022`; it has
 no `require_apple_signing` input, uses no Apple secrets, downloads no macOS
 CLI and rejects a signing-required `release-policy.json`. `bump_release.py`
 also updates `cli/display.hpp`, the `Display.4dm` version check and the
-`x.y.z.0` Windows manifest identity. Lifting the gate requires the Windows
-runtime/host work in the README, not a weaker check.
+`x.y.z.0` Windows manifest identity. A Windows-only release requires
+`windows_4d` passed and exactly `x86_64_generic` compiler targets.
 
 The fixed tool4d download may redirect from `resources-download.4d.com` to the
 verified exact official HTTPS archive hostname `builds2.4d.com`. Accept only

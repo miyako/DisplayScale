@@ -135,7 +135,7 @@ def platform_contract(contract, system=None):
     return {**contract, **selected}
 
 
-def validate_status(status, contract, expect_compiled):
+def validate_status(status, contract, expect_compiled, system=None):
     """Validate reusable completion/results and fixture-owned JSON assertions."""
     if (not isinstance(status, dict) or status.get("success") is not True
             or status.get("finished") is not True
@@ -143,7 +143,7 @@ def validate_status(status, contract, expect_compiled):
         raise ValueError("4D host requires success:true, finished:true and exact compiled mode")
     if not isinstance(contract, dict) or type(contract.get("schema")) is not int or contract["schema"] != 1:
         raise ValueError("unsupported host contract schema")
-    contract = platform_contract(contract)
+    contract = platform_contract(contract, system)
     feature = contract.get("feature")
     execution = contract.get("execution")
     if not isinstance(feature, dict) or not isinstance(execution, dict):
