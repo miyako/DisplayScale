@@ -12,10 +12,15 @@ and explicitly records clean-machine execution as not_run. These technical check
 do not certify the publisher's license rights. Confirm applicable Visual Studio
 redistribution eligibility before publishing. No standalone CRT
 DLLs, Windows SDK libraries or vendor tool4d installation are packaged here.
+The exact api-ms-win-shcore-scaling-l1-1-1.dll import is an OS loader contract for
+GetProcessDpiAwareness, not a separately redistributed runtime DLL. Its documented
+SHCORE.dll host is also allowlisted. No wildcard API-set/CRT imports are approved.
 Official references:
 https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files
 https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution
 https://visualstudio.microsoft.com/license-terms/
+https://learn.microsoft.com/en-us/windows/win32/api/shellscalingapi/nf-shellscalingapi-getprocessdpiawareness
+https://learn.microsoft.com/en-us/windows/win32/apiindex/windows-apisets
 
 macOS development-only binaries use system libc++/libSystem dynamically.
 They are unsupported-platform test backends, not macOS feature releases.

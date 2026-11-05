@@ -23,8 +23,11 @@ class WindowsRuntimeTests(unittest.TestCase):
     def test_only_explicit_system_imports_are_accepted(self):
         result = runtime.dependency_names(dependencies("KERNEL32.dll", "USER32.dll", "SHCORE.dll"))
         self.assertEqual(result, ["kernel32.dll", "shcore.dll", "user32.dll"])
+        self.assertEqual(runtime.dependency_names(dependencies(
+            "KERNEL32.dll", "USER32.dll", "api-ms-win-shcore-scaling-l1-1-1.dll")),
+            ["api-ms-win-shcore-scaling-l1-1-1.dll", "kernel32.dll", "user32.dll"])
         for extra in ("VCRUNTIME140.dll", "MSVCP140.dll", "ucrtbase.dll", "custom.dll",
-                      "api-ms-win-crt-runtime-l1-1-0.dll"):
+                      "api-ms-win-crt-runtime-l1-1-0.dll", "api-ms-win-shcore-scaling-l1-1-99.dll"):
             with self.subTest(extra=extra), self.assertRaisesRegex(ValueError, "unexpected"):
                 runtime.dependency_names(dependencies("KERNEL32.dll", "USER32.dll", "SHCORE.dll", extra))
 

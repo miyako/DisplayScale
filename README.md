@@ -117,6 +117,11 @@ explicit Windows system DLL allowlist is accepted; dynamic/debug CRT or unexpect
 imports fail CI. Evidence (`runtime-status.json`, imports and object directives)
 is uploaded with `cli-windows-x64`. This is **not** a clean-machine deployment
 test or a legal certification of the publisher's Visual Studio license.
+The scaling import may be `SHCORE.dll` or the verified exact OS API-set contract
+`api-ms-win-shcore-scaling-l1-1-1.dll`, documented for
+[GetProcessDpiAwareness](https://learn.microsoft.com/en-us/windows/win32/api/shellscalingapi/nf-shellscalingapi-getprocessdpiawareness).
+[API sets identify Windows loader contracts, not redistributable files](https://learn.microsoft.com/en-us/windows/win32/apiindex/windows-apisets).
+No blanket API-set prefix or VC runtime DLL allowlist is used.
 
 Local macOS 4D source/compiler/compiled-package checks exercise protocol
 validation, generic execution and the unsupported-platform error, **not Windows

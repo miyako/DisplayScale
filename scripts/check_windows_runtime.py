@@ -14,7 +14,9 @@ from build_provenance import sha256, verify
 from ci_config import ROOT, load_config
 
 
-SYSTEM_IMPORTS = {"kernel32.dll", "user32.dll", "shcore.dll"}
+BASE_IMPORTS = {"kernel32.dll", "user32.dll"}
+SCALING_IMPORTS = {"shcore.dll", "api-ms-win-shcore-scaling-l1-1-1.dll"}
+SYSTEM_IMPORTS = BASE_IMPORTS | SCALING_IMPORTS
 DYNAMIC_OR_DEBUG_LIBRARIES = {
     "msvcrt", "msvcrtd", "msvcprt", "msvcprtd", "libcmtd", "libcpmtd",
     "ucrt", "ucrtd", "vcruntime", "vcruntimed",
@@ -58,7 +60,7 @@ def dependency_names(output):
     unexpected = names - SYSTEM_IMPORTS
     if unexpected:
         raise ValueError("unexpected non-allowlisted DLL imports: " + ", ".join(sorted(unexpected)))
-    if not SYSTEM_IMPORTS <= names:
+    if not BASE_IMPORTS <= names or not names & SCALING_IMPORTS:
         raise ValueError("expected Windows system API imports are missing")
     return sorted(names)
 
