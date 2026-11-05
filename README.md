@@ -158,6 +158,31 @@ builds ARM64 macOS libraries plus x64 generic code. There is no approved native
 Windows tool4d URL/SHA256 or Windows source/final-package host workflow. Reusing
 the macOS pin cannot execute a Windows host. No release/tag/asset exists for a
 real GitHub dependency-manager download, and publication is not authorized.
+Windows 4D 21.0 cannot link the `arm64_macOS_lib` target that
+`compile_component.py`, `tooling/compiler` and the packager require, so a
+Windows compile path also needs target-aware changes. See
+[#2](https://github.com/miyako/DisplayScale/issues/2) for emulated (Windows
+ARM64) diagnostics; those are not native x64 acceptance.
+
+### Running workflows from the Actions tab
+
+Both workflows can be started with **Actions → Run workflow**:
+
+* **CI** (select a branch): runs configuration checks, the native Windows x64
+  CLI build/tests and runtime-import check, and resource assembly. Without the
+  repository variable `FOURD_ENABLED=true`, the 4D compile/host jobs are
+  skipped. Green CI is CLI/resource evidence, not compiled 4D host evidence.
+* **Release compiled component**: requires `version_tag`, an **already
+  existing** `v<version>` tag (currently `v0.1.0`); it never creates a tag.
+  Pushing a `v*` tag also starts this workflow automatically. Today every run
+  stops in the `gate` job, before building anything:
+  1. no matching tag exists, so tag resolution fails;
+  2. `ci_config.py validate --release` requires `FOURD_ENABLED=true`;
+  3. even then, it rejects any release whose only resource target is
+     `windows-x64` until the Windows runtime/host blockers above are resolved.
+
+  No release or asset is published by such a run; the only side effect of
+  preparing one is the pushed tag.
 
 ## Installation after an accepted release
 
