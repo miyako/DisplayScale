@@ -15,7 +15,7 @@ spec.loader.exec_module(compiler)
 
 class CompilerTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="compile tests ")
+        self.temp = tempfile.TemporaryDirectory(prefix=".compiler-test-", dir=ROOT)
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name).resolve()
         config = json.loads((ROOT / "template.json").read_text())
