@@ -50,7 +50,7 @@ def accept(root, repository, tool4d, tag=None, require_apple_signing=False):
     try:
         config = load_config(root, initialized=True, repository=repository, tag=tag)
         report["configuration"] = config
-        require_tool4d_host()
+        tool4d_host = require_tool4d_host()
         tool = Path(tool4d).resolve()
         version = subprocess.run([str(tool), "--version"], check=True, capture_output=True,
                                  text=True, timeout=30)
@@ -111,12 +111,17 @@ def accept(root, repository, tool4d, tag=None, require_apple_signing=False):
         unpacked = unpack_for_test(root, archive)
         compiled = step("compiled_host", lambda: test_4d(root, tool, unpacked))
         (output.parent / "compiled-host-status.json").write_text(json.dumps(compiled, indent=2) + "\n")
+        if tool4d_host == "windows-x64":
+            report["steps"]["windows_4d"] = {"status": "passed", "details": {
+                "host": report["host"], "tool4d": report["tool4d"],
+                "evidence": ["source_host", "compiled_host"]}}
         for asset, evidence in zip(assets, report["assets"]):
             if sha256(asset) != evidence["sha256"]:
                 raise ValueError("final asset changed during host acceptance: " + asset.name)
         report.update(result="partial", finished=True,
                       finished_at=datetime.now(timezone.utc).isoformat(),
-                      reason="Verified package; native Intel/Windows 4D and published download remain separate checks")
+                      reason=("Verified package on native " + platform.system() + " tool4d; other 4D hosts, "
+                              "physical display topologies and published download remain separate checks"))
         save()
         evidence = archive.with_suffix(".acceptance.json")
         if any(path.is_symlink() for path in (evidence, *evidence.parents)):

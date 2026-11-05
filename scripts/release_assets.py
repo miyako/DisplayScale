@@ -7,6 +7,7 @@ import subprocess
 
 from build_provenance import commit, sha256, source_digest
 from ci_config import ROOT, load_config, resource_targets
+from package_component import allowed_compile_targets
 from release_ref import create_tag as create_release_tag, verify as verify_tag
 from sign_release import release_policy, submission_uuid
 from test_4d import _read_json, validate_status
@@ -78,19 +79,30 @@ def verify_assets(root, repository, tag, revision, apple_signing=False):
             raise ValueError("required acceptance step did not pass: " + name)
         return step.get("details")
 
+    host = report.get("host")
+    system = host.get("system") if isinstance(host, dict) else None
+    if system not in ("Windows", "Darwin"):
+        raise ValueError("acceptance evidence must identify a native Windows or macOS 4D host")
+    windows_only = tuple(resource_targets(config)) == ("windows-x64",)
+    if windows_only:
+        if system != "Windows":
+            raise ValueError("Windows-only releases require native Windows 4D host acceptance")
+        passed("windows_4d")
     contract = _read_json(root / "tests/host/contract.json")
-    validate_status(passed("source_host"), contract, False)
-    validate_status(passed("compiled_host"), contract, True)
+    validate_status(passed("source_host"), contract, False, system)
+    validate_status(passed("compiled_host"), contract, True, system)
     for name in ("assembly", "package"):
         passed(name)
     compiled = passed("compile")
     if (not isinstance(compiled, dict) or compiled.get("success") is not True
             or not isinstance(compiled.get("targets"), list)
-            or set(compiled["targets"]) != {"x86_64_generic", "arm64_macOS_lib"}
+            or len(set(compiled["targets"])) != len(compiled["targets"])
+            or set(compiled["targets"]) not in allowed_compile_targets(config)
+            or system == "Windows" and compiled["targets"] != ["x86_64_generic"]
             or any(not isinstance(compiled.get(field), str)
                    or not re.fullmatch(r"[0-9a-f]{64}", compiled[field])
                    for field in ("input_sha256", "output_sha256"))):
-        raise ValueError("both compiler targets and input/output provenance are required")
+        raise ValueError("required compiler targets and input/output provenance are required")
     source = source_digest(root)
     for target in resource_targets(config):
         manifest = passed("cli_test_" + target)
@@ -103,7 +115,7 @@ def verify_assets(root, repository, tag, revision, apple_signing=False):
     if apple_signing:
         passed("signing")
         passed("signing_proof")
-        validate_status(passed("unsigned_compiled_host"), contract, True)
+        validate_status(passed("unsigned_compiled_host"), contract, True, system)
         expected += ["dist/" + name + ".dmg", "dist/" + name + "-signing.json"]
     elif not isinstance(steps.get("signing"), dict) or steps["signing"].get("status") != "not_run":
         raise ValueError("unsigned publication must not conceal signing evidence")

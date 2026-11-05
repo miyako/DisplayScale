@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
+import ci_config
 import release_assets
 import test_delivery
 import test_host_runner
@@ -23,10 +24,13 @@ class ReleaseAssetsTests(unittest.TestCase):
         contract = self.root / "tests/host/contract.json"
         contract.parent.mkdir(parents=True)
         contract.write_text(json.dumps(test_host_runner.CONTRACT))
-        archive = self.fixture.package()
+        self.build_report(self.fixture.package(), "Darwin")
+
+    def build_report(self, archive, system):
         self.evidence = archive.with_suffix(".acceptance.json")
         self.report = {
             "schema": 1, "scope": "hosted", "commit": self.revision,
+            "host": {"system": system, "machine": "x86_64" if system == "Windows" else "arm64"},
             "finished": True, "result": "partial", "release_ready": False,
             "configuration": self.fixture.config,
             "steps": {
@@ -60,6 +64,44 @@ class ReleaseAssetsTests(unittest.TestCase):
             assets = self.verify()
         self.assertEqual([path.name for path in assets],
                          ["example-component.zip", "example-component.acceptance.json"])
+
+    def windows_release(self):
+        self.fixture.windows_scope()
+        self.fixture.build_fixture("windows-x64", test_delivery.synthetic_pe())
+        ci_config.assemble(self.root)
+        self.fixture.status["targets"] = ["x86_64_generic"]
+        self.fixture.write_status()
+        self.build_report(self.fixture.package(), "Windows")
+        self.report["steps"]["windows_4d"] = {"status": "passed"}
+        self.save()
+
+    def test_windows_only_release_requires_native_windows_x86_64_host_evidence(self):
+        self.windows_release()
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(len(self.verify()), 2)
+        original = copy.deepcopy(self.report)
+        for change, message in (
+                (lambda report: report["host"].update(system="Darwin"), "native Windows 4D"),
+                (lambda report: report["host"].update(system="Linux"), "native Windows or macOS"),
+                (lambda report: report.pop("host"), "native Windows or macOS"),
+                (lambda report: report["steps"]["windows_4d"].update(status="not_run"), "windows_4d"),
+                (lambda report: report["steps"]["compile"]["details"].update(
+                    targets=["x86_64_generic", "arm64_macOS_lib"]), "compiler targets"),
+                (lambda report: report["steps"]["compile"]["details"].update(
+                    targets=["arm64_macOS_lib"]), "compiler targets"),
+                (lambda report: report["steps"]["compile"]["details"].update(
+                    targets=["x86_64_generic", "x86_64_generic"]), "compiler targets")):
+            self.report = copy.deepcopy(original)
+            change(self.report)
+            self.save()
+            with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
+                self.verify()
+
+    def test_x86_64_only_compile_is_not_accepted_for_macos_resource_targets(self):
+        self.report["steps"]["compile"]["details"]["targets"] = ["x86_64_generic"]
+        self.save()
+        with self.assertRaisesRegex(ValueError, "compiler targets"):
+            self.verify()
 
     def test_false_finished_wrong_commit_and_source_shaped_host_are_rejected(self):
         original = copy.deepcopy(self.report)
@@ -202,7 +244,10 @@ class ReleaseAssetsTests(unittest.TestCase):
 
     def test_windows_only_publish_never_receives_apple_secrets_or_signing_input(self):
         workflow = (ROOT / ".github/workflows/publish.yml").read_text()
-        self.assertIn("name: Build and accept unsigned component without Apple secrets", workflow)
+        self.assertIn("name: Source host, x86_64 compile, package and final compiled-ZIP host on native Windows 4D",
+                      workflow)
+        self.assertIn("runs-on: windows-2022", workflow)
+        self.assertIn("--tool4d .tools/tool4d/tool4d.exe", workflow)
         self.assertNotIn("secrets.", workflow)
         self.assertNotIn("require_apple_signing", workflow)
         self.assertNotIn("--require-apple-signing", workflow)

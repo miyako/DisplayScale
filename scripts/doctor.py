@@ -8,7 +8,7 @@ import shutil
 import os
 import sys
 
-from ci_config import ROOT, load_config, require_tool4d_host, resolve_tool_pin
+from ci_config import ROOT, load_config, require_tool4d_host, resolve_tool_pin, tool4d_executable
 from build_cli import native_target
 from initialize import github_repository
 
@@ -27,7 +27,12 @@ def doctor(root=ROOT, tool4d=None):
         report["actual_repository"] = os.environ.get("GITHUB_REPOSITORY")
     if report["actual_repository"] and report["actual_repository"].rsplit("/", 1)[-1] != config["repository"]:
         raise ValueError("actual GitHub repository basename does not match template.json; initialize exact destination")
-    url, digest = resolve_tool_pin(root)
+    try:
+        tool_host = require_tool4d_host()
+        host_error = None
+    except ValueError as error:
+        tool_host, host_error = None, str(error)
+    url, digest = resolve_tool_pin(root, host=tool_host or "macos-arm64")
     report["tool4d_pin"] = {"url": url, "archive_sha256": digest}
     def check(name, ok, detail):
         report["checks"].append({"name": name, "status": "passed" if ok else "not_run",
@@ -57,12 +62,8 @@ def doctor(root=ROOT, tool4d=None):
         {"path": str(Path(root) / relative),
          "status": "present" if (Path(root) / relative).is_file() else "not_run"}
         for relative in artifact_paths]
-    try:
-        require_tool4d_host()
-        check("pinned_tool4d_host", True, "macOS ARM64")
-    except ValueError as error:
-        check("pinned_tool4d_host", False, str(error))
-    candidate = Path(tool4d) if tool4d else Path(root) / ".tools/tool4d.app/Contents/MacOS/tool4d"
+    check("pinned_tool4d_host", tool_host is not None, tool_host or host_error)
+    candidate = Path(tool4d) if tool4d else tool4d_executable(root, tool_host or "macos-arm64")
     check("tool4d", candidate.is_file() and os.access(candidate, os.X_OK), str(candidate))
     if platform.system() == "Darwin" and {"macos-x64", "macos-arm64"} <= set(report["resource_targets"]):
         check("lipo", shutil.which("lipo") is not None, "required for universal resource assembly")

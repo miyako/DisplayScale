@@ -46,7 +46,7 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: python scripts/bump_release.py apply --version "$VERSION" --stage
-      - name: Fail closed pending pinned Windows runtime and real Windows source/compiled host acceptance
+      - name: Require hosted 4D opt-in and the pinned native Windows x64 tool4d
         env:
           FOURD_ENABLED: ${{ vars.FOURD_ENABLED }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
@@ -86,7 +86,10 @@ jobs:
 
   compile:
     needs: [version, native]
-    runs-on: macos-15
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: bash
     env:
       FOURD_ENABLED: ${{ vars.FOURD_ENABLED }}
       TOOL4D_URL: ${{ vars.TOOL4D_URL }}
@@ -105,12 +108,12 @@ jobs:
         with:
           name: cli-windows-x64
           path: build/windows-x64
-      - name: Download SHA-256-verified tool4D
+      - name: Download SHA-256-verified native Windows x64 tool4D
         run: python scripts/ci_config.py download-tool4d
-      - name: Build and accept unsigned component without Apple secrets
+      - name: Source host, x86_64 compile, package and final compiled-ZIP host on native Windows 4D
         run: >-
           python scripts/accept_hosted.py --repository "$GITHUB_REPOSITORY"
-          --tool4d .tools/tool4d.app/Contents/MacOS/tool4d --tag "$RELEASE_TAG"
+          --tool4d .tools/tool4d/tool4d.exe --tag "$RELEASE_TAG"
       - uses: actions/upload-artifact@v4
         with:
           name: compiled-release

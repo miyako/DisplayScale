@@ -34,8 +34,8 @@ class HostedAcceptanceTests(unittest.TestCase):
         self.host_calls.append(component is not None)
         return {"success": True, "finished": True, "compiled": component is not None}
 
-    def accept(self, signed=False, subprocess_run=None):
-        with patch.object(accept_hosted, "require_tool4d_host"), patch.object(
+    def accept(self, signed=False, subprocess_run=None, host="macos-arm64"):
+        with patch.object(accept_hosted, "require_tool4d_host", return_value=host), patch.object(
                 accept_hosted, "assemble"), patch.object(
                 accept_hosted, "compile_component", return_value=self.fixture.status), patch.object(
                 accept_hosted, "test_4d", side_effect=self.host), patch.object(
@@ -61,6 +61,13 @@ class HostedAcceptanceTests(unittest.TestCase):
         self.assertEqual(json.loads(archive.with_suffix(".acceptance.json").read_text()), report)
         for name in ("source-host-status.json", "compiled-host-status.json"):
             self.assertTrue((self.root / "build" / name).is_file())
+
+    def test_windows_4d_passes_only_after_native_windows_source_and_compiled_hosts(self):
+        report = self.accept(host="windows-x64")
+        self.assertEqual(self.host_calls, [False, True])
+        self.assertEqual(report["steps"]["windows_4d"]["status"], "passed")
+        self.assertEqual(report["steps"]["windows_4d"]["details"]["evidence"], ["source_host", "compiled_host"])
+        self.assertFalse(report["release_ready"])
 
     def test_cross_only_or_changed_manifest_stops_before_any_host(self):
         manifest = self.root / "build/windows-x64/build-manifest.json"
@@ -170,11 +177,15 @@ class HostedAcceptanceTests(unittest.TestCase):
         self.assertEqual(report["steps"]["compiled_host"]["status"], "not_run")
         self.assertFalse(report["finished"])
 
-    def test_production_hosted_acceptance_only_in_fail_closed_publish(self):
-        # DisplayScale CI runs only the macOS development backend; production
-        # Windows acceptance belongs to Publish, which currently fails closed.
+    def test_native_windows_hosted_acceptance_in_ci_and_publish(self):
         ci = (ROOT / ".github/workflows/ci.yml").read_text()
-        self.assertNotIn("accept_hosted.py", ci)
+        self.assertEqual(ci.count("accept_hosted.py"), 1)
+        windows = ci[ci.index("  windows-host:"):ci.index("  development-host:")]
+        self.assertIn("runs-on: windows-2022", windows)
+        self.assertIn("name: cli-windows-x64", windows)
+        self.assertIn("download-tool4d", windows)
+        self.assertIn("--tool4d .tools/tool4d/tool4d.exe", windows)
+        self.assertIn("name: compiled-component", windows)
         self.assertIn("assemble --local-development", ci)
         self.assertNotIn("gh release", ci)
         workflow = (ROOT / ".github/workflows/publish.yml").read_text()
@@ -182,7 +193,7 @@ class HostedAcceptanceTests(unittest.TestCase):
         self.assertIn("name: compiled-release", workflow)
         self.assertIn("dist/*.acceptance.json", workflow)
         self.assertIn("name: release-acceptance-diagnostics", workflow)
-        self.assertLess(workflow.index("Fail closed pending pinned Windows runtime"),
+        self.assertLess(workflow.index("Require hosted 4D opt-in and the pinned native Windows x64 tool4d"),
                         workflow.index("git commit"))
         self.assertLess(workflow.index("accept_hosted.py"), workflow.index("name: compiled-release"))
 

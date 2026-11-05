@@ -17,6 +17,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
+from contextlib import redirect_stderr, redirect_stdout
 import build_cli
 import accept_local
 import ci_config
@@ -234,15 +235,33 @@ class DeliveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Windows x64 only"):
             ci_config.load_config(self.root)
 
-    def test_windows_release_is_blocked_even_with_hosted_opt_in(self):
+    def test_windows_release_requires_hosted_opt_in_and_native_windows_tool4d_pin(self):
         self.windows_scope()
-        environment = {"GITHUB_REPOSITORY": "owner/example-component", "FOURD_ENABLED": "true"}
-        with patch.dict(os.environ, environment, clear=True), patch.object(
-                sys, "argv", ["ci_config.py", "validate", "--release", "--tag", "v0.1.0",
-                              "--root", str(self.root)]):
-            with self.assertRaises(SystemExit) as caught:
+        pin = {"platform": "win", "branch": "20.x", "version": "20.7", "build": "101905", "arch": "x64",
+               "sha256": "31d5300ca38df9b18b32c07835ab9b1e1cf0deee6c936a382581723ed0edd4dc"}
+
+        def validate(enabled, tool_windows):
+            metadata = {"name": self.config["repository"], "version": self.config["version"]}
+            if tool_windows is not None:
+                metadata["tool_windows"] = tool_windows
+            (self.root / "package.json").write_text(json.dumps(metadata), encoding="utf-8")
+            environment = {"GITHUB_REPOSITORY": "owner/example-component"}
+            if enabled:
+                environment["FOURD_ENABLED"] = "true"
+            with patch.dict(os.environ, environment, clear=True), patch.object(
+                    sys, "argv", ["ci_config.py", "validate", "--release", "--tag", "v0.1.0",
+                                  "--root", str(self.root)]), redirect_stdout(io.StringIO()):
                 ci_config.main()
+
+        for enabled, tool_windows in ((True, None), (False, pin), (True, {**pin, "platform": "mac"}),
+                                      (True, {**pin, "arch": "arm"}), (True, {**pin, "sha256": "0" * 63})):
+            with self.subTest(enabled=enabled, tool_windows=tool_windows), self.assertRaises(SystemExit) as caught, \
+                    redirect_stderr(io.StringIO()):
+                validate(enabled, tool_windows)
             self.assertEqual(caught.exception.code, 2)
+        validate(True, pin)
+        self.assertEqual(ci_config.tool_pin(self.root, "windows-x64")[0],
+                         "https://resources-download.4d.com/release/20.x/20.7/101905/win/tool4d_win.tar.xz")
 
     def test_platform_cli_vectors_do_not_claim_darwin_feature_success(self):
         contract = self.root / "contract.json"

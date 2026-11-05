@@ -7,6 +7,18 @@ import subprocess
 import sys
 import shutil
 import hashlib
+import os
+import platform
+
+
+def compile_targets(system=None):
+    """Windows Compile project cannot link arm64_macOS_lib; it produces x86_64_generic only."""
+    system = system or platform.system()
+    return ["x86_64_generic"] if system == "Windows" else ["x86_64_generic", "arm64_macOS_lib"]
+
+
+def same_path(left, right):
+    return os.path.normcase(str(Path(left).resolve())) == os.path.normcase(str(Path(right).resolve()))
 
 
 def input_digest(root):
@@ -45,7 +57,7 @@ def output_digest(component):
 
 def compile_component(root, tool4d):
     root = Path(root).resolve()
-    config = json.loads((root / "template.json").read_text())
+    config = json.loads((root / "template.json").read_text(encoding="utf-8"))
     if not config["initialized"]:
         raise ValueError("initialize the destination repository before compiling")
     name = config["repository"]
@@ -56,7 +68,9 @@ def compile_component(root, tool4d):
     output.parent.mkdir(exist_ok=True)
     output.unlink(missing_ok=True)
     request = output.parent / "compile-request.json"
-    request.write_text(json.dumps({"project": str(project), "status": str(output)}) + "\n")
+    targets = compile_targets()
+    request.write_text(json.dumps({"project": str(project), "status": str(output),
+                                   "targets": targets}) + "\n", encoding="utf-8")
     derived = project.parent / "DerivedData"
     if any(path.is_symlink() for path in [derived, *derived.parents]):
         raise ValueError("compiler cleanup path must not traverse symlinks")
@@ -74,16 +88,17 @@ def compile_component(root, tool4d):
                    check=True, timeout=180)
     if not output.is_file():
         raise ValueError("tool4d did not write compile-status.json; compilation is unverified")
-    status = json.loads(output.read_text())
+    status = json.loads(output.read_text(encoding="utf-8"))
     if status.get("success") is not True:
         raise ValueError("4D compilation failed: " + json.dumps(status.get("errors", [])))
-    if status.get("project") != project.as_posix() or set(status.get("targets", [])) != {"x86_64_generic", "arm64_macOS_lib"}:
+    if (not isinstance(status.get("project"), str) or not same_path(status["project"], project)
+            or status.get("targets") != targets):
         raise ValueError("compiler result does not identify the required project and targets")
     if input_digest(root) != original_digest:
         raise ValueError("component inputs changed during compilation; refusing stale output")
     status["input_sha256"] = original_digest
     status["output_sha256"] = output_digest(project.parent.parent)
-    output.write_text(json.dumps(status, indent=2) + "\n")
+    output.write_text(json.dumps(status, indent=2) + "\n", encoding="utf-8")
     return status
 
 
@@ -97,7 +112,7 @@ def main():
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         print(f"4D compilation failed: {error}", file=sys.stderr)
         return 1
-    print("4D compilation succeeded for macOS ARM64 and x86_64 generic targets")
+    print("4D compilation succeeded for targets: " + ", ".join(compile_targets()))
     return 0
 
 
