@@ -123,7 +123,7 @@ def plan(root, version, repository=None):
 
     # These are protocol examples, not arbitrary SemVer mentions in prose, URLs,
     # dependency manifests, compiler pins, or historical release instructions.
-    protocol = r'(?:"protocol"|protocol)\s*:\s*1\s*,\s*(?:"version"|version)\s*:\s*"(?P<version>[^"\r\n]*)"'
+    protocol = r'(?:"protocol"|protocol)\s*:\s*[12]\s*,\s*(?:"version"|version)\s*:\s*"(?P<version>[^"\r\n]*)"'
     assignment = (
         r'(?i:\b(?:const|var|let|constexpr)\s+'
         r'(?:(?:char\s*\*|std::string_view|auto)\s*)?'
@@ -138,7 +138,7 @@ def plan(root, version, repository=None):
     count = literal(source, protocol, placeholders=placeholders)
     if config["language"] == "cpp":
         # C++ string literal: {\"protocol\":1,\"version\":\"X.Y.Z\"}
-        count += literal(source, r'\\"protocol\\"\s*:\s*1\s*,\s*\\"version\\"\s*:\s*\\"'
+        count += literal(source, r'\\"protocol\\"\s*:\s*[12]\s*,\s*\\"version\\"\s*:\s*\\"'
                          r'(?P<version>[^"\\\r\n]*)\\"')
     # Combine edits against the original text, rather than losing a protocol edit.
     if re.search(assignment, source_text):
@@ -203,7 +203,7 @@ def plan(root, version, repository=None):
     literal("tests/test_cli.py", protocol, required=True)
 
     def payload(value, *, placeholder=False):
-        if isinstance(value, dict) and "version" in value and type(value.get("protocol")) is int and value["protocol"] == 1:
+        if isinstance(value, dict) and "version" in value and type(value.get("protocol")) is int and value["protocol"] in (1, 2):
             if value["version"] == "$VERSION":
                 if placeholder:
                     return value

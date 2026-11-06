@@ -122,8 +122,8 @@ def assemble(root=ROOT, local_development=False):
     manifests = []
     for target, path in zip(targets, inputs):
         status = verify(root, target, path)
-        if config.get("resource_targets") and status.get("execution") != "passed":
-            raise ValueError("explicit production/development resources require native CLI execution: " + target)
+        if status.get("execution") != "passed":
+            raise ValueError("production resources require native CLI execution: " + target)
         manifests.append(status)
     if config.get("resource_targets"):
         if destination.exists():
@@ -391,7 +391,7 @@ def main():
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--release", action="store_true")
     parser.add_argument("--local-development", action="store_true",
-                        help="assemble only the native macOS unsupported backend; never a production resource")
+                        help="assemble only the native macOS development profile; never a production resource")
     parser.add_argument("--tag", help="prefix-free SemVer release tag; defaults to GITHUB_REF_NAME")
     parser.add_argument("--url", help="optional official URL override, paired with --sha256")
     parser.add_argument("--sha256", help="optional approved hash override; otherwise env pair/package.json.tool")

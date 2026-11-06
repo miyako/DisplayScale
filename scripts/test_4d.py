@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import shutil
+import tempfile
 import uuid
 import platform
 import math
@@ -115,6 +116,22 @@ def _success_result(result, feature=False):
         raise ValueError("host success result must not contain an error")
     if feature and ("value" not in result or result["value"] is None):
         raise ValueError("host feature success result requires a value")
+
+
+def _resource_binary_sha256(native, target):
+    """SHA256 of the native-arch CLI inside a resource; macOS resources are universal."""
+    with open(native, "rb") as handle:
+        magic = handle.read(4)
+    if magic != b"\xca\xfe\xba\xbe":
+        return sha256(native)
+    architecture = {"macos-arm64": "arm64", "macos-x64": "x86_64"}.get(target)
+    if architecture is None:
+        raise ValueError("universal resource requires a native macOS target")
+    with tempfile.TemporaryDirectory() as scratch:
+        thin = Path(scratch) / "thin"
+        subprocess.run(["lipo", str(native), "-thin", architecture, "-output", str(thin)],
+                       check=True, capture_output=True, timeout=60)
+        return sha256(thin)
 
 
 def platform_contract(contract, system=None):
@@ -261,22 +278,21 @@ def test_4d(root, tool4d, component=None):
         request_values = {"status": str(host / (_host_path_prefix("host status") + ".json")),
                           "expectCompiled": component is not None, "executable": str(executable),
                           "platform": platform.system()}
-        if config.get("resource_targets") == ["windows-x64"]:
-            target = native_target()
-            name = config["cli"] + "-test-echo" + (".exe" if os.name == "nt" else "")
-            build_executable = root / "build" / target / executable_name
-            manifest = verify(root, target, build_executable)
-            helper = root / "build" / target / name
-            _no_symlinks(helper)
-            helpers = manifest.get("test_helpers")
-            if (not helper.is_file() or manifest.get("execution") != "passed"
-                    or not isinstance(helpers, dict) or helpers.get(name) != sha256(helper)
-                    or manifest["binary_sha256"] != sha256(native)):
-                raise ValueError("fresh same-source native test-only echo helper is required")
-            echo = host / (_host_path_prefix("isolated echo helper") + (".exe" if os.name == "nt" else ""))
-            shutil.copy2(helper, echo)
-            echo.chmod(0o755)
-            request_values["echo"] = str(echo)
+        target = native_target()
+        name = config["cli"] + "-test-echo" + (".exe" if os.name == "nt" else "")
+        build_executable = root / "build" / target / executable_name
+        manifest = verify(root, target, build_executable)
+        helper = root / "build" / target / name
+        _no_symlinks(helper)
+        helpers = manifest.get("test_helpers")
+        if (not helper.is_file() or manifest.get("execution") != "passed"
+                or not isinstance(helpers, dict) or helpers.get(name) != sha256(helper)
+                or manifest["binary_sha256"] != _resource_binary_sha256(native, target)):
+            raise ValueError("fresh same-source native test-only echo helper is required")
+        echo = host / (_host_path_prefix("isolated echo helper") + (".exe" if os.name == "nt" else ""))
+        shutil.copy2(helper, echo)
+        echo.chmod(0o755)
+        request_values["echo"] = str(echo)
         request = host / (_host_path_prefix("host request") + ".json")
         staged_output = host / (_host_path_prefix("host status") + ".json")
         request.write_text(json.dumps(request_values, ensure_ascii=False) + "\n",

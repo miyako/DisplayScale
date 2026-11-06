@@ -2,26 +2,38 @@
   "schema": 1,
   "feature": {
     "casesPath": "/cases",
-    "cases": [
-      {"stdout": "{\"protocol\":1,\"version\":\"0.1.3\"}\n", "stderr": "", "exitCode": 0, "value": {"protocol": 1, "version": "0.1.3"}}
+    "caseCount": 1,
+    "caseAssertions": [
+      {"path": "/value/protocol", "equals": 2},
+      {"path": "/value/platform", "equals": "macos"},
+      {"path": "/value/monitors", "each": [
+        {"path": "/device", "matches": "[^\\u0000]+"},
+        {"path": "/bounds/left", "numeric": true},
+        {"path": "/bounds/top", "numeric": true},
+        {"path": "/bounds/right", "numeric": true},
+        {"path": "/bounds/bottom", "numeric": true},
+        {"path": "/backingPixels/width", "numeric": true},
+        {"path": "/backingPixels/height", "numeric": true},
+        {"path": "/nativePixels/width", "numeric": true},
+        {"path": "/nativePixels/height", "numeric": true},
+        {"path": "/backingScalePercent", "numeric": true},
+        {"path": "/scalePercent", "numeric": true}
+      ]}
     ],
     "assertions": [
-      {"path": "/monitors/ok", "equals": false},
-      {"path": "/monitors/exitCode", "equals": 3},
-      {"path": "/monitors/stdout", "equals": ""},
-      {"path": "/monitors/stderr", "matches": "\\{\"protocol\":1,\"error\":\\{\"code\":\"UNSUPPORTED_PLATFORM\",\"message\":\"[^\"\\n]+\"\\}\\}\\n"},
-      {"path": "/monitors/error/code", "equals": "cli_error"},
-      {"path": "/monitors/value", "absent": true},
+      {"path": "/monitors/ok", "equals": true},
+      {"path": "/monitors/exitCode", "equals": 0},
+      {"path": "/monitors/stderr", "equals": ""},
       {"path": "/invalid/ok", "equals": false},
       {"path": "/invalid/exitCode", "equals": 2},
       {"path": "/invalid/stdout", "equals": ""},
-      {"path": "/invalid/stderr", "matches": "\\{\"protocol\":1,\"error\":\\{\"code\":\"INVALID_ARGUMENTS\",\"message\":\"[^\"\\n]+\"\\}\\}\\n"},
+      {"path": "/invalid/stderr", "matches": "\\{\"protocol\":2,\"error\":\\{\"code\":\"INVALID_ARGUMENTS\",\"message\":\"[^\"\\n]+\"\\}\\}\\n"},
       {"path": "/invalid/error/code", "equals": "cli_error"},
       {"path": "/version/ok", "equals": true},
-      {"path": "/version/stdout", "equals": "{\"protocol\":1,\"version\":\"0.1.3\"}\n"},
+      {"path": "/version/stdout", "equals": "{\"protocol\":2,\"version\":\"0.1.3\"}\n"},
       {"path": "/version/stderr", "equals": ""},
       {"path": "/version/exitCode", "equals": 0},
-      {"path": "/version/value", "equals": {"protocol": 1, "version": "0.1.3"}},
+      {"path": "/version/value", "equals": {"protocol": 2, "version": "0.1.3"}},
       {"path": "/protocol/ok", "equals": false},
       {"path": "/protocol/stdout", "equals": "not json\n"},
       {"path": "/protocol/stderr", "equals": ""},
@@ -71,6 +83,22 @@
       {"path": "/decoderCases/2/value/monitors/0/dpi", "equals": 121},
       {"path": "/decoderCases/2/value/monitors/0/scalePercent", "numeric": true},
       {"path": "/fractionChecks", "equals": true},
+          {"path": "/macDecoderCases", "length": 3, "each": [
+            {"path": "/ok", "equals": true},
+            {"path": "/stderr", "equals": ""},
+            {"path": "/exitCode", "equals": 0},
+            {"path": "/value/platform", "equals": "macos"}
+          ]},
+          {"path": "/macDecoderCases/0/value/monitors/0/scalePercent", "equals": 200},
+          {"path": "/macDecoderCases/1/value/monitors/0/scalePercent", "equals": 168},
+          {"path": "/macDecoderCases/2/value/monitors/0/scalePercent", "equals": 100},
+          {"path": "/macDecoderCases/1/value/monitors/0/backingScalePercent", "equals": 200},
+          {"path": "/invalidMacMonitors", "length": 12, "each": [
+            {"path": "/ok", "equals": false},
+            {"path": "/error/code", "equals": "invalid_protocol"},
+            {"path": "/exitCode", "equals": 0},
+            {"path": "/value", "absent": true}
+          ]},
       {"path": "/invalidMonitors", "length": 16, "each": [
         {"path": "/ok", "equals": false},
         {"path": "/error/code", "equals": "invalid_protocol"},
@@ -85,7 +113,8 @@
         "casesPath": "/cases",
         "caseCount": 1,
         "caseAssertions": [
-          {"path": "/value/protocol", "equals": 1},
+          {"path": "/value/protocol", "equals": 2},
+          {"path": "/value/platform", "equals": "windows"},
           {"path": "/value/monitors", "each": [
             {"path": "/device", "matches": "[^\\u0000]+"},
             {"path": "/bounds/left", "numeric": true},
@@ -103,13 +132,13 @@
           {"path": "/invalid/ok", "equals": false},
           {"path": "/invalid/exitCode", "equals": 2},
           {"path": "/invalid/stdout", "equals": ""},
-          {"path": "/invalid/stderr", "matches": "\\{\"protocol\":1,\"error\":\\{\"code\":\"INVALID_ARGUMENTS\",\"message\":\"[^\"\\n]+\"\\}\\}\\n"},
+          {"path": "/invalid/stderr", "matches": "\\{\"protocol\":2,\"error\":\\{\"code\":\"INVALID_ARGUMENTS\",\"message\":\"[^\"\\n]+\"\\}\\}\\n"},
           {"path": "/invalid/error/code", "equals": "cli_error"},
           {"path": "/version/ok", "equals": true},
-          {"path": "/version/stdout", "equals": "{\"protocol\":1,\"version\":\"0.1.3\"}\n"},
+          {"path": "/version/stdout", "equals": "{\"protocol\":2,\"version\":\"0.1.3\"}\n"},
           {"path": "/version/stderr", "equals": ""},
           {"path": "/version/exitCode", "equals": 0},
-          {"path": "/version/value", "equals": {"protocol": 1, "version": "0.1.3"}},
+          {"path": "/version/value", "equals": {"protocol": 2, "version": "0.1.3"}},
           {"path": "/protocol/ok", "equals": false},
           {"path": "/protocol/stdout", "equals": "not json\n"},
           {"path": "/protocol/stderr", "equals": ""},
@@ -159,6 +188,22 @@
           {"path": "/decoderCases/2/value/monitors/0/dpi", "equals": 121},
           {"path": "/decoderCases/2/value/monitors/0/scalePercent", "numeric": true},
           {"path": "/fractionChecks", "equals": true},
+          {"path": "/macDecoderCases", "length": 3, "each": [
+            {"path": "/ok", "equals": true},
+            {"path": "/stderr", "equals": ""},
+            {"path": "/exitCode", "equals": 0},
+            {"path": "/value/platform", "equals": "macos"}
+          ]},
+          {"path": "/macDecoderCases/0/value/monitors/0/scalePercent", "equals": 200},
+          {"path": "/macDecoderCases/1/value/monitors/0/scalePercent", "equals": 168},
+          {"path": "/macDecoderCases/2/value/monitors/0/scalePercent", "equals": 100},
+          {"path": "/macDecoderCases/1/value/monitors/0/backingScalePercent", "equals": 200},
+          {"path": "/invalidMacMonitors", "length": 12, "each": [
+            {"path": "/ok", "equals": false},
+            {"path": "/error/code", "equals": "invalid_protocol"},
+            {"path": "/exitCode", "equals": 0},
+            {"path": "/value", "absent": true}
+          ]},
           {"path": "/invalidMonitors", "length": 16, "each": [
             {"path": "/ok", "equals": false},
             {"path": "/error/code", "equals": "invalid_protocol"},
@@ -172,7 +217,7 @@
   "execution": {
     "successPaths": ["/fileArgument", "/folderArgument", "/renamedExecutable"],
     "assertions": [
-      {"path": "/renamedExecutable", "equals": {"ok": true, "stdout": "{\"protocol\":1,\"version\":\"0.1.3\"}\n", "stderr": "", "exitCode": 0}},
+      {"path": "/renamedExecutable", "equals": {"ok": true, "stdout": "{\"protocol\":2,\"version\":\"0.1.3\"}\n", "stderr": "", "exitCode": 0}},
       {"path": "/pathChecks", "equals": true},
       {"path": "/quotedArguments", "length": 6, "each": [
         {"path": "/ok", "equals": true},

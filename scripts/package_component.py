@@ -247,7 +247,7 @@ def package(root=ROOT, *, repository=None, tag=None, language=None, local_develo
         marker = {"schema": 1, "profile": "DEVELOPMENT", "release_ready": False,
                   "production_platforms": ["Windows-x64"], "backend_targets": list(targets),
                   "feature_support": False,
-                  "reason": "macOS backend returns UNSUPPORTED_PLATFORM; not a Windows production package"}
+                  "reason": "macOS development profile; not a production release package"}
         entries.append((prefix + "DEVELOPMENT.json", (json.dumps(marker, indent=2) + "\n").encode(), 0o644))
     for name, path in files:
         if name.startswith("Project/"):
@@ -306,7 +306,7 @@ def main():
     parser.add_argument("--unpack-test", action="store_true",
                         help="also unpack the generated archive under build/release-test")
     parser.add_argument("--local-development", action="store_true",
-                        help="native macOS unsupported-backend DEVELOPMENT ZIP; not production/release ready")
+                        help="native macOS DEVELOPMENT ZIP; not production/release ready")
     args = parser.parse_args()
     try:
         archive = package(args.root, repository=args.repository, tag=args.tag, language=args.language,

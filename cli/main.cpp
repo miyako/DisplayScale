@@ -1,4 +1,5 @@
 #include "display.hpp"
+#include "macos_backend.hpp"
 #include "windows_backend.hpp"
 #include <cstdio>
 #include <iostream>
@@ -9,7 +10,7 @@
 #endif
 
 namespace {
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
 class UnsupportedBackend final : public display_scale::Backend {
 public:
     void begin() override {
@@ -24,6 +25,8 @@ public:
 int run(const std::vector<std::string>& arguments) {
 #ifdef _WIN32
     display_scale::WindowsBackend backend;
+#elif defined(__APPLE__)
+    display_scale::MacBackend backend;
 #else
     UnsupportedBackend backend;
 #endif

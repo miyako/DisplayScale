@@ -5,13 +5,16 @@
 This initialized destination is `miyako/DisplayScale`, namespace `DisplayScale`,
 class `Display`, CLI `display-scale`, C++17. Do not reinitialize it. The generic
 template guidance below is retained as provenance/reference, not a promise of
-DisplayScale macOS feature support or three-platform release requirements.
-The [README](README.md), [feature contract](component/DisplayScale/Documentation/Classes/Display.md)
-and [manual Windows checks](tests/manual-windows.md) define this destination:
-Windows 10 1703+ / Windows 11 x64 effective scaling, read-only/on demand.
-macOS builds are explicitly unsupported-platform **development test backends**.
-Production resources are Windows-only; local development packaging must be
-explicitly selected and cannot approve a production release. Preserve all
+DisplayScale release requirements.
+The [README](README.md), [feature contract](component/DisplayScale/Documentation/Classes/Display.md),
+[manual Windows checks](tests/manual-windows.md) and [manual macOS checks](tests/manual-macos.md)
+define this destination: effective display scaling on Windows 10 1703+ / Windows
+11 x64 and macOS 11+ (CoreGraphics backend, protocol 2), read-only/on demand.
+Production release resources remain **Windows x64 only**; the macOS backend is
+exercised through the explicit local/CI `--local-development` macOS profile
+(thin native CLI, DEVELOPMENT package that is never a release) until a macOS
+release pipeline (universal resource, macOS 4D host, Publish integration) is
+approved. C++ cannot be cross-built. Preserve all
 same-source/provenance, real compiler, source-stripping and final unpacked-host
 gates. Windows CLI CI, Windows 4D host acceptance and physical/manual topology
 acceptance are distinct. Windows 4D host acceptance runs on native `windows-2022`

@@ -4,6 +4,7 @@ var $parameter; $name; $target : Text
 var $folderPath : Text
 var $request; $result; $report : Object
 var $payload; $monitor : Object
+var $platform : Text
 var $dpi : Real
 var $tool : cs.DisplayScale.Display
 var $requestFile; $statusFile : 4D.File
@@ -55,19 +56,9 @@ If ($request.expectCompiled#$report.compiled)
 End if
 $result:=$tool.monitors()
 $report.monitors:=$result
-If (Is Windows)
-	$report.cases.push($result)
-	If (Not($result.ok))
-		$report.success:=False
-	End if
-Else
-	If ($result.ok | ($result.exitCode#3))
-		$report.success:=False
-	Else
-		If (JSON Parse($result.stderr).error.code#"UNSUPPORTED_PLATFORM")
-			$report.success:=False
-		End if
-	End if
+$report.cases.push($result)
+If (Not($result.ok))
+	$report.success:=False
 End if
 $result:=$tool._cli.execute(New collection("monitors"; "unexpected"))
 $report.invalid:=$result
@@ -76,9 +67,6 @@ If ($result.ok | ($result.exitCode#2))
 End if
 $result:=$tool.version()
 $report.version:=$result
-If (Not(Is Windows))
-	$report.cases.push($result)
-End if
 If (Not($result.ok))
 	$report.success:=False
 Else
@@ -135,7 +123,7 @@ $report.decoderCases:=New collection
 $report.fractionChecks:=True
 For each ($dpi; New collection(120; 144; 121))
 	$monitor:=New object("device"; "日本語 display"; "primary"; True; "bounds"; New object("left"; -1920; "top"; -100; "right"; 0; "bottom"; 980); "dpi"; $dpi; "scalePercent"; ($dpi/96)*100)
-	$payload:=New object("protocol"; 1; "monitors"; New collection($monitor))
+	$payload:=New object("protocol"; 2; "platform"; "windows"; "monitors"; New collection($monitor))
 	$result:=$tool._decode(New object("ok"; True; "stdout"; JSON Stringify($payload)+Char(10); "stderr"; ""; "exitCode"; 0); "monitors")
 	$report.decoderCases.push($result)
 	If (Not($result.ok))
@@ -149,7 +137,7 @@ For each ($dpi; New collection(120; 144; 121))
 	End if
 End for each
 $report.invalidMonitors:=New collection
-For each ($name; New collection("{\"protocol\":1,\"monitors\":null}"; "{\"protocol\":1,\"monitors\":[]}"; "{\"protocol\":1,\"monitors\":[null]}"; "{\"protocol\":1,\"monitors\":[1]}"; "{\"protocol\":1,\"monitors\":[{}]}"))
+For each ($name; New collection("{\"protocol\":2,\"platform\":\"windows\",\"monitors\":null}"; "{\"protocol\":2,\"platform\":\"windows\",\"monitors\":[]}"; "{\"protocol\":2,\"platform\":\"windows\",\"monitors\":[null]}"; "{\"protocol\":2,\"platform\":\"windows\",\"monitors\":[1]}"; "{\"protocol\":2,\"platform\":\"windows\",\"monitors\":[{}]}"))
 	$result:=$tool._decode(New object("ok"; True; "stdout"; $name+Char(10); "stderr"; ""; "exitCode"; 0); "monitors")
 	$report.invalidMonitors.push($result)
 	If ($result.ok | ($result.error.code#"invalid_protocol"))
@@ -159,7 +147,7 @@ End for each
 For each ($name; New collection("device"; "primary"; "bounds"; "dpi"; "scalePercent"))
 	$monitor:=New object("device"; "display"; "primary"; True; "bounds"; New object("left"; 0; "top"; 0; "right"; 1920; "bottom"; 1080); "dpi"; 120; "scalePercent"; 125)
 	$monitor[$name]:=Null
-	$payload:=New object("protocol"; 1; "monitors"; New collection($monitor))
+	$payload:=New object("protocol"; 2; "platform"; "windows"; "monitors"; New collection($monitor))
 	$result:=$tool._decode(New object("ok"; True; "stdout"; JSON Stringify($payload)+Char(10); "stderr"; ""; "exitCode"; 0); "monitors")
 	$report.invalidMonitors.push($result)
 	If ($result.ok | ($result.error.code#"invalid_protocol"))
@@ -178,7 +166,7 @@ For each ($name; New collection("wrongScale"; "noPrimary"; "invalidBounds"; "fra
 		: ($name="fractionalDpi")
 			$monitor.dpi:=120.5
 	End case
-	$payload:=New object("protocol"; 1; "monitors"; New collection($monitor))
+	$payload:=New object("protocol"; 2; "platform"; "windows"; "monitors"; New collection($monitor))
 	If ($name="duplicateDevice")
 		$payload.monitors.push($monitor)
 	End if
@@ -188,6 +176,49 @@ For each ($name; New collection("wrongScale"; "noPrimary"; "invalidBounds"; "fra
 	End if
 	$result:=$tool._decode(New object("ok"; True; "stdout"; $parameter; "stderr"; ""; "exitCode"; 0); "monitors")
 	$report.invalidMonitors.push($result)
+	If ($result.ok | ($result.error.code#"invalid_protocol"))
+		$report.success:=False
+	End if
+End for each
+HOST_Phase:="macOS monitor decoder"
+$report.macDecoderCases:=New collection
+For each ($name; New collection("retina"; "moreSpace"; "external"))
+	Case of
+		: ($name="retina")
+			$monitor:=New object("device"; "display-1"; "primary"; True; "bounds"; New object("left"; 0; "top"; 0; "right"; 1512; "bottom"; 982); "backingPixels"; New object("width"; 3024; "height"; 1964); "nativePixels"; New object("width"; 3024; "height"; 1964); "backingScalePercent"; 200; "scalePercent"; 200)
+		: ($name="moreSpace")
+			$monitor:=New object("device"; "display-1"; "primary"; True; "bounds"; New object("left"; 0; "top"; 0; "right"; 1800; "bottom"; 1169); "backingPixels"; New object("width"; 3600; "height"; 2338); "nativePixels"; New object("width"; 3024; "height"; 1964); "backingScalePercent"; 200; "scalePercent"; 168)
+		Else
+			$monitor:=New object("device"; "display-2"; "primary"; True; "bounds"; New object("left"; 0; "top"; 0; "right"; 2560; "bottom"; 1440); "backingPixels"; New object("width"; 2560; "height"; 1440); "nativePixels"; New object("width"; 2560; "height"; 1440); "backingScalePercent"; 100; "scalePercent"; 100)
+	End case
+	$payload:=New object("protocol"; 2; "platform"; "macos"; "monitors"; New collection($monitor))
+	$result:=$tool._decode(New object("ok"; True; "stdout"; JSON Stringify($payload)+Char(10); "stderr"; ""; "exitCode"; 0); "monitors")
+	$report.macDecoderCases.push($result)
+	If (Not($result.ok))
+		$report.success:=False
+	End if
+End for each
+$report.invalidMacMonitors:=New collection
+For each ($name; New collection("device"; "primary"; "bounds"; "backingPixels"; "nativePixels"; "backingScalePercent"; "scalePercent"; "wrongScale"; "wrongBackingScale"; "zeroNative"; "fractionalPixel"; "unknownPlatform"))
+	$monitor:=New object("device"; "display-1"; "primary"; True; "bounds"; New object("left"; 0; "top"; 0; "right"; 1512; "bottom"; 982); "backingPixels"; New object("width"; 3024; "height"; 1964); "nativePixels"; New object("width"; 3024; "height"; 1964); "backingScalePercent"; 200; "scalePercent"; 200)
+	$platform:="macos"
+	Case of
+		: ($name="wrongScale")
+			$monitor.scalePercent:=100
+		: ($name="wrongBackingScale")
+			$monitor.backingScalePercent:=100
+		: ($name="zeroNative")
+			$monitor.nativePixels.width:=0
+		: ($name="fractionalPixel")
+			$monitor.backingPixels.width:=3024.5
+		: ($name="unknownPlatform")
+			$platform:="linux"
+		Else
+			$monitor[$name]:=Null
+	End case
+	$payload:=New object("protocol"; 2; "platform"; $platform; "monitors"; New collection($monitor))
+	$result:=$tool._decode(New object("ok"; True; "stdout"; JSON Stringify($payload)+Char(10); "stderr"; ""; "exitCode"; 0); "monitors")
+	$report.invalidMacMonitors.push($result)
 	If ($result.ok | ($result.error.code#"invalid_protocol"))
 		$report.success:=False
 	End if

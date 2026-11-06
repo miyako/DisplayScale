@@ -71,7 +71,7 @@ jobs:
       - name: Select Rust 1.99.1
         if: matrix.language == 'rust'
         run: rustup default 1.99.1
-      - name: Native Windows feature tests / macOS unsupported-backend and pure-helper tests
+      - name: Native Windows and macOS feature tests and pure-helper tests
         run: python -m unittest discover -s tests -p test_cli.py -v
       - name: Native build and protocol smoke tests
         run: python scripts/build_cli.py --target "$CLI_TARGET" --language "$CLI_LANGUAGE"
@@ -176,7 +176,7 @@ jobs:
         with:
           name: cli-macos-arm64
           path: build/macos-arm64
-      - name: Assemble DEVELOPMENT unsupported backend (not Windows feature acceptance)
+      - name: Assemble macOS DEVELOPMENT package (not production release resources)
         run: python scripts/ci_config.py assemble --local-development
       - name: Download pinned free tool4D for optional branch and PR integration tests
         if: vars.FOURD_ENABLED == 'true' && github.ref_type != 'tag' && !inputs.release_call

@@ -111,7 +111,7 @@ def accept(root, repository, tool4d, cross=False, local_development=False):
         report["finished_at"] = datetime.now(timezone.utc).isoformat()
         report["reason"] = "Local package verified; hosted/native Intel4D/Windows4D/release/signing remain separate observations"
         if local_development:
-            report["reason"] = "DEVELOPMENT package: native macOS unsupported backend and 4D wiring only; Windows display feature and Windows 4D acceptance not exercised"
+            report["reason"] = "DEVELOPMENT package: native macOS backend and 4D wiring only; Windows display feature and Windows 4D acceptance not exercised"
         save()
         evidence = archive.with_suffix(".acceptance.json")
         if evidence.is_symlink():
@@ -131,7 +131,7 @@ def main():
     parser.add_argument("--tool4d", type=Path, required=True)
     parser.add_argument("--cross", action="store_true", help="Go/macOS cross-build all targets, not foreign runtime proof")
     parser.add_argument("--local-development", action="store_true",
-                        help="accept native macOS unsupported backend only; produces a DEVELOPMENT package")
+                        help="accept the native macOS development profile only; produces a DEVELOPMENT package")
     args = parser.parse_args()
     try:
         report = accept(args.root, args.repository, args.tool4d, args.cross, args.local_development)

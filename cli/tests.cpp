@@ -35,6 +35,26 @@ struct FakeBackend : Backend {
     void finish() override { fault(5); finished = true; }
 };
 
+struct FakeMac : Backend {
+    std::vector<Monitor> monitors = {
+        {7, "display-7", false, {1512, 0, 3552, 1152}},
+        {1, "display-1", true, {0, 0, 1800, 1169}}
+    };
+    MacScale scale{3024, 1964, 3024, 1964};
+    int reads = 0;
+    const char* platform() const override { return "macos"; }
+    void begin() override {}
+    std::vector<Monitor> snapshot() override { return monitors; }
+    unsigned read_dpi(const Monitor&) override { return 0; }
+    MacScale read_mac(const Monitor& monitor) override {
+        ++reads;
+        auto value = scale;
+        if (monitor.handle == 7) value = {2040, 1152, 2040, 1152};
+        return value;
+    }
+    void finish() override {}
+};
+
 void error(const Result& result, const std::string& code) {
     check(result.status == 3, "operational failure status");
     check(result.stdout_text.empty(), "must not emit partial output");
@@ -86,9 +106,53 @@ void tests() {
     for (auto value : {"\x80", "\xff", "\xc0\xaf", "\xed\xa0\x80", "\xf4\x90\x80\x80"})
         check(!valid_utf8(value), "invalid UTF-8");
 
+    FakeMac mac;
+    const auto mac_result = execute({"monitors"}, mac);
+    check(mac_result.status == 0 && mac_result.stderr_text.empty(), "macOS success");
+    check(mac_result.stdout_text.rfind("{\"protocol\":2,\"platform\":\"macos\",", 0) == 0,
+        "macOS protocol 2");
+    check(mac_result.stdout_text.find("\"nativePixels\":{\"width\":3024,\"height\":1964}") !=
+        std::string::npos, "native pixels");
+    check(mac_result.stdout_text.find("\"backingScalePercent\":168") != std::string::npos,
+        "non-integer effective scale for More space");
+    check(mac_result.stdout_text.find("\"scalePercent\":100}") != std::string::npos,
+        "1x external display");
+    check(mac_result.stdout_text.find("\"dpi\"") == std::string::npos, "no fake macOS dpi");
+    check(mac_result.stdout_text.find("display-1") < mac_result.stdout_text.find("display-7"),
+        "primary first on macOS");
+    check(mac.reads == 4, "macOS double scale sampling");
+    struct MacRetina : FakeMac {
+        MacScale read_mac(const Monitor&) override { return {3024, 1964, 3024, 1964}; }
+    } retina;
+    retina.monitors = {retina.monitors[1]};
+    retina.monitors[0].bounds = {0, 0, 1512, 982};
+    const auto retina_result = execute({"monitors"}, retina);
+    check(retina_result.stdout_text.find("\"backingScalePercent\":200,\"scalePercent\":200") !=
+        std::string::npos, "default Retina scale");
+    struct MacChanging : FakeMac {
+        MacScale read_mac(const Monitor& monitor) override {
+            auto value = FakeMac::read_mac(monitor);
+            if (reads > 2) value.backing_width += 2;
+            return value;
+        }
+    } mac_changing;
+    error(execute({"monitors"}, mac_changing), "TOPOLOGY_CHANGED");
+    struct MacNoNative : FakeMac {
+        MacScale read_mac(const Monitor&) override { return {3024, 1964, 0, 0}; }
+    } no_native;
+    error(execute({"monitors"}, no_native), "MACOS_API_ERROR");
+    FakeMac mac_empty;
+    mac_empty.monitors.clear();
+    error(execute({"monitors"}, mac_empty), "NO_MONITORS");
+    FakeMac mac_bad_bounds;
+    mac_bad_bounds.monitors[0].bounds.right = mac_bad_bounds.monitors[0].bounds.left;
+    error(execute({"monitors"}, mac_bad_bounds), "MACOS_API_ERROR");
+
     FakeBackend good;
     const auto result = execute({"monitors"}, good);
     check(result.status == 0 && result.stderr_text.empty() && good.finished, "success");
+    check(result.stdout_text.rfind("{\"protocol\":2,\"platform\":\"windows\",", 0) == 0,
+        "Windows protocol 2");
     check(result.stdout_text.find("\"dpi\":120,\"scalePercent\":125") != std::string::npos,
         "scale JSON");
     check(result.stdout_text.find(quote("主 😀 \"display\"\\")) <

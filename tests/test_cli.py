@@ -1,3 +1,4 @@
+import sys
 import ctypes
 import json
 import os
@@ -17,11 +18,8 @@ def json_line(value):
     return (json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
 
 
-ERROR = json_line({"protocol": 1, "error": {
+ERROR = json_line({"protocol": 2, "error": {
     "code": "INVALID_ARGUMENTS", "message": "expected monitors or --version"}})
-UNSUPPORTED = json_line({"protocol": 1, "error": {
-    "code": "UNSUPPORTED_PLATFORM",
-    "message": "monitors requires Windows 10 version 1703 or later on x64"}})
 
 
 class CppCLI(unittest.TestCase):
@@ -90,7 +88,7 @@ class CppCLI(unittest.TestCase):
         self.assertEqual(result.stderr, stderr)
 
     def test_version(self):
-        self.assert_result(["--version"], 0, b'{"protocol":1,"version":"0.1.3"}\n', b"")
+        self.assert_result(["--version"], 0, b'{"protocol":2,"version":"0.1.3"}\n', b"")
 
     def test_pure_backend(self):
         result = subprocess.run(["ctest", "--test-dir", str(self.build), "-C", "Release",
@@ -116,7 +114,7 @@ class CppCLI(unittest.TestCase):
                                 capture_output=True, timeout=20)
         self.assertEqual(result.returncode, 2)
         self.assertEqual(result.stdout, b"")
-        self.assertEqual(result.stderr, json_line({"protocol": 1, "error": {
+        self.assertEqual(result.stderr, json_line({"protocol": 2, "error": {
             "code": "INVALID_ARGUMENTS", "message": "arguments must be valid UTF-8"}}))
 
     def test_production_build_excludes_helpers(self):
@@ -186,9 +184,36 @@ class CppCLI(unittest.TestCase):
         for value in ["\ud800", "\udfff", "valid\ud800"]:
             self.assert_result([value], 2, b"", ERROR)
 
-    @unittest.skipIf(os.name == "nt", "macOS unsupported-platform contract")
-    def test_unsupported_platform(self):
-        self.assert_result(["monitors"], 3, b"", UNSUPPORTED)
+    @unittest.skipUnless(sys.platform == "darwin", "macOS CoreGraphics backend")
+    def test_native_macos_topology(self):
+        result = self.run_cli(["monitors"])
+        if result.returncode == 3 and b'"NO_MONITORS"' in result.stderr:
+            self.skipTest("no active macOS display (headless session)")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, b"")
+        self.assertEqual(result.stdout.count(b"\n"), 1)
+        payload = json.loads(result.stdout.decode("utf-8"))
+        self.assertEqual(set(payload), {"protocol", "platform", "monitors"})
+        self.assertEqual(payload["protocol"], 2)
+        self.assertEqual(payload["platform"], "macos")
+        monitors = payload["monitors"]
+        self.assertTrue(monitors)
+        self.assertEqual(monitors, sorted(monitors, key=lambda m: (not m["primary"], m["device"])))
+        self.assertEqual(sum(1 for monitor in monitors if monitor["primary"]), 1)
+        for monitor in monitors:
+            self.assertEqual(set(monitor), {"device", "primary", "bounds", "backingPixels",
+                                            "nativePixels", "backingScalePercent", "scalePercent"})
+            bounds = monitor["bounds"]
+            points = bounds["right"] - bounds["left"]
+            self.assertGreater(points, 0)
+            self.assertGreater(bounds["bottom"], bounds["top"])
+            for key in ("backingPixels", "nativePixels"):
+                self.assertEqual(set(monitor[key]), {"width", "height"})
+                self.assertTrue(all(type(v) is int and v > 0 for v in monitor[key].values()))
+            self.assertAlmostEqual(monitor["backingScalePercent"],
+                                   monitor["backingPixels"]["width"] / points * 100, delta=1e-9)
+            self.assertAlmostEqual(monitor["scalePercent"],
+                                   monitor["nativePixels"]["width"] / points * 100, delta=1e-9)
 
     @unittest.skipUnless(os.name == "nt", "real Windows topology required")
     def test_native_topology(self):
@@ -200,9 +225,10 @@ class CppCLI(unittest.TestCase):
         self.assertTrue(result.stdout.endswith(b"\n"))
         self.assertEqual(result.stdout.count(b"\n"), 1)
         payload = json.loads(result.stdout.decode("utf-8"))
-        self.assertEqual(set(payload), {"protocol", "monitors"})
+        self.assertEqual(set(payload), {"protocol", "platform", "monitors"})
         self.assertIs(type(payload["protocol"]), int)
-        self.assertEqual(payload["protocol"], 1)
+        self.assertEqual(payload["protocol"], 2)
+        self.assertEqual(payload["platform"], "windows")
         after = windows_topology()
         self.assertEqual(before, after, "topology changed during native smoke test")
         monitors = payload["monitors"]

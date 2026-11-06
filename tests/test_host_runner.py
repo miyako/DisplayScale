@@ -22,7 +22,7 @@ CONTRACT.pop("platforms", None)
 
 def valid_status(compiled=False):
     status = {"success": True, "finished": True, "compiled": compiled,
-              "cases": [{"ok": True, **copy.deepcopy(case)} for case in CONTRACT["feature"]["cases"]],
+              "cases": [],
               "fileArgument": {"ok": True, "stdout": "file round trip", "stderr": "", "exitCode": 0},
               "folderArgument": {"ok": True, "stdout": "folder round trip", "stderr": "", "exitCode": 0}}
     def apply_assertions(value, assertions):
@@ -44,9 +44,9 @@ def valid_status(compiled=False):
                 destination[key] = assertion["approximately"]
             if "matches" in assertion:
                 candidates = [
-                    json.dumps({"protocol": 1, "error": {"code": code, "message": "test diagnostic"}},
+                    json.dumps({"protocol": 2, "error": {"code": code, "message": "test diagnostic"}},
                                separators=(",", ":")) + "\n"
-                    for code in ("UNSUPPORTED_PLATFORM", "INVALID_ARGUMENTS")]
+                    for code in ("INVALID_ARGUMENTS",)]
                 destination[key] = next(candidate for candidate in candidates
                                         if re.fullmatch(assertion["matches"], candidate))
             if "length" in assertion:
@@ -55,6 +55,13 @@ def valid_status(compiled=False):
                 destination[key] = [apply_assertions(entry, assertion["each"]) for entry in destination[key]]
         return value
 
+    feature = CONTRACT["feature"]
+    if "cases" in feature:
+        status["cases"] = [{"ok": True, **copy.deepcopy(case)} for case in feature["cases"]]
+    else:
+        status["cases"] = [apply_assertions(
+            {"ok": True, "stdout": "{}\n", "stderr": "", "exitCode": 0, "value": {"monitors": [{}]}},
+            feature["caseAssertions"]) for _ in range(feature["caseCount"])]
     for section in ("feature", "execution"):
         status = apply_assertions(status, CONTRACT[section]["assertions"])
     assertions = {entry["path"]: entry for entry in CONTRACT["execution"]["assertions"]}
@@ -90,7 +97,7 @@ class ContractTests(unittest.TestCase):
 
     def test_windows_monitor_contract_validates_semantics_and_rejects_boolean_numbers(self):
         contract = json.loads((ROOT / "tests/host/contract.json").read_text(encoding="utf-8"))
-        value = {"protocol": 1, "monitors": [{"device": "DISPLAY1", "primary": True,
+        value = {"protocol": 2, "platform": "windows", "monitors": [{"device": "DISPLAY1", "primary": True,
                  "bounds": {"left": -1920, "top": 0, "right": 0, "bottom": 1080},
                  "dpi": 120, "scalePercent": 125.0}]}
         result = {"ok": True, "stdout": json.dumps(value, separators=(",", ":")) + "\n",
@@ -280,10 +287,10 @@ class ContractTests(unittest.TestCase):
     def test_contract_malformed_and_empty_sections_fail_closed(self):
         for mutation in (
                 lambda c: c.update(schema=True),
-                lambda c: c["feature"].update(cases=[]),
+                lambda c: c["feature"].update(caseCount=0),
                 lambda c: c["feature"].update(assertions=[]),
                 lambda c: c["execution"].update(assertions=[]),
-                lambda c: c["feature"]["cases"][0].pop("value"),
+                lambda c: c["feature"].update(caseAssertions=[]),
                 lambda c: c["execution"].update(successPaths=None),
                 lambda c: c["execution"]["assertions"].append({"path": "/success", "equal": True})):
             contract = copy.deepcopy(CONTRACT)

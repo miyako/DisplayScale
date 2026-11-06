@@ -19,6 +19,10 @@ Function _decode($result : Object; $field : Text)->$decoded : Object
 	var $coordinate : Variant
 	var $primaryCount : Integer
 	var $fieldName : Text
+	var $size : Variant
+	var $platform : Text
+	var $pointWidth : Real
+	var $dimension : Text
 	If (Not($result.ok))
 		return $result
 	End if
@@ -44,7 +48,7 @@ Function _decode($result : Object; $field : Text)->$decoded : Object
 		$result.error:=New object("code"; "invalid_protocol"; "message"; "Unsupported CLI protocol version")
 		return $result
 	End if
-	If ($payload.protocol#1)
+	If ($payload.protocol#2)
 		$result.ok:=False
 		$result.error:=New object("code"; "invalid_protocol"; "message"; "Unsupported CLI protocol version")
 		return $result
@@ -58,6 +62,13 @@ Function _decode($result : Object; $field : Text)->$decoded : Object
 				return This._invalid($result; "CLI version does not match component")
 			End if
 		: ($field="monitors")
+			If (Value type($payload.platform)#Is text)
+				return This._invalid($result; "CLI platform must be Text")
+			End if
+			If (($payload.platform#"windows") & ($payload.platform#"macos"))
+				return This._invalid($result; "CLI platform must be windows or macos")
+			End if
+			$platform:=$payload.platform
 			If (Value type($payload.monitors)#Is collection)
 				return This._invalid($result; "CLI monitors must be a Collection")
 			End if
@@ -105,17 +116,48 @@ Function _decode($result : Object; $field : Text)->$decoded : Object
 				If (($bounds.right<=$bounds.left) | ($bounds.bottom<=$bounds.top))
 					return This._invalid($result; "Monitor bounds must have positive area")
 				End if
-				If ((Value type($monitor.dpi)#Is real) & (Value type($monitor.dpi)#Is longint))
-					return This._invalid($result; "Monitor dpi must be numeric")
-				End if
-				If (($monitor.dpi<=0) | ($monitor.dpi#Int($monitor.dpi)) | ($monitor.dpi>4294967295.0))
-					return This._invalid($result; "Monitor dpi must be a positive UINT")
-				End if
-				If ((Value type($monitor.scalePercent)#Is real) & (Value type($monitor.scalePercent)#Is longint))
-					return This._invalid($result; "Monitor scalePercent must be numeric")
-				End if
-				If (Abs($monitor.scalePercent-(($monitor.dpi/96)*100))>0.000000001)
-					return This._invalid($result; "Monitor scalePercent does not match effective dpi")
+				If ($platform="windows")
+					If ((Value type($monitor.dpi)#Is real) & (Value type($monitor.dpi)#Is longint))
+						return This._invalid($result; "Monitor dpi must be numeric")
+					End if
+					If (($monitor.dpi<=0) | ($monitor.dpi#Int($monitor.dpi)) | ($monitor.dpi>4294967295.0))
+						return This._invalid($result; "Monitor dpi must be a positive UINT")
+					End if
+					If ((Value type($monitor.scalePercent)#Is real) & (Value type($monitor.scalePercent)#Is longint))
+						return This._invalid($result; "Monitor scalePercent must be numeric")
+					End if
+					If (Abs($monitor.scalePercent-(($monitor.dpi/96)*100))>0.000000001)
+						return This._invalid($result; "Monitor scalePercent does not match effective dpi")
+					End if
+				Else
+					$pointWidth:=$bounds.right-$bounds.left
+					For each ($fieldName; New collection("backingPixels"; "nativePixels"))
+						$size:=$monitor[$fieldName]
+						If (Value type($size)#Is object)
+							return This._invalid($result; "Monitor pixel size must be an Object")
+						End if
+						For each ($dimension; New collection("width"; "height"))
+							$coordinate:=$size[$dimension]
+							If ((Value type($coordinate)#Is real) & (Value type($coordinate)#Is longint))
+								return This._invalid($result; "Monitor pixel size must be numeric")
+							End if
+							If (($coordinate<=0) | ($coordinate#Int($coordinate)) | ($coordinate>4294967295.0))
+								return This._invalid($result; "Monitor pixel size must be a positive UINT")
+							End if
+						End for each
+					End for each
+					If ((Value type($monitor.backingScalePercent)#Is real) & (Value type($monitor.backingScalePercent)#Is longint))
+						return This._invalid($result; "Monitor backingScalePercent must be numeric")
+					End if
+					If (Abs($monitor.backingScalePercent-(($monitor.backingPixels.width/$pointWidth)*100))>0.000000001)
+						return This._invalid($result; "Monitor backingScalePercent does not match backing pixels")
+					End if
+					If ((Value type($monitor.scalePercent)#Is real) & (Value type($monitor.scalePercent)#Is longint))
+						return This._invalid($result; "Monitor scalePercent must be numeric")
+					End if
+					If (Abs($monitor.scalePercent-(($monitor.nativePixels.width/$pointWidth)*100))>0.000000001)
+						return This._invalid($result; "Monitor scalePercent does not match native pixels")
+					End if
 				End if
 			End for each
 			If ($primaryCount#1)
