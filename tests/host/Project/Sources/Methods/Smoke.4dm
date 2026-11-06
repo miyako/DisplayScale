@@ -82,7 +82,7 @@ End if
 If (Not($result.ok))
 	$report.success:=False
 Else
-	If ($result.value.version#"0.1.2")
+	If ($result.value.version#"0.1.3")
 		$report.success:=False
 	End if
 End if

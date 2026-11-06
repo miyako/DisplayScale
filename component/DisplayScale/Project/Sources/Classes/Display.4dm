@@ -54,7 +54,7 @@ Function _decode($result : Object; $field : Text)->$decoded : Object
 			If (Value type($payload.version)#Is text)
 				return This._invalid($result; "CLI version must be Text")
 			End if
-			If ($payload.version#"0.1.2")
+			If ($payload.version#"0.1.3")
 				return This._invalid($result; "CLI version does not match component")
 			End if
 		: ($field="monitors")

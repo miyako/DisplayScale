@@ -6,7 +6,7 @@
   "cli": "display-scale",
   "language": "cpp",
   "feature": "Read effective per-monitor display scaling on Windows 10 1703+ x64",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "feature_class": "Display",
   "resource_targets": ["windows-x64"],
   "unsupported_backend_platforms": ["Darwin"]
