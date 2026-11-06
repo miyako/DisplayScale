@@ -5,9 +5,7 @@
   "namespace": "DisplayScale",
   "cli": "display-scale",
   "language": "cpp",
-  "feature": "Read effective per-monitor display scaling on Windows 10 1703+ x64",
+  "feature": "Read effective per-monitor display scaling on Windows 10 1703+ x64 and macOS 11+ (Apple Silicon and Intel)",
   "version": "0.1.0",
-  "feature_class": "Display",
-  "resource_targets": ["windows-x64"],
-  "unsupported_backend_platforms": ["Darwin"]
+  "feature_class": "Display"
 }

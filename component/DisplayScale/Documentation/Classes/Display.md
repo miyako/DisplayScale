@@ -1,21 +1,19 @@
 # Display
 
-`cs.DisplayScale.Display.new("Windows-x64")` constructs the synchronous,
+`cs.DisplayScale.Display.new("Windows-x64")` (or `"macOS-universal"`) constructs the synchronous,
 read-only feature API. Internally the class is `cs.Display`. The independent
 namespace `DisplayScale` must not conflict with another component in your host;
 the initializer cannot establish uniqueness across future dependencies.
 
 | Method | Result |
 | --- | --- |
-| `monitors() : Object` | Query effective scaling currently applied to every monitor in the calling Windows desktop/session |
+| `monitors() : Object` | Query effective scaling currently applied to every monitor in the calling desktop/session |
 | `version() : Object` | Check bundled CLI protocol/version |
 
 Supported feature platform: **Windows 10 version 1703 (build 15063) or later /
-Windows 11, x64**. Pass the explicit `"Windows-x64"` target. Windows ARM64,
-including x64 emulation, is not a support promise. The development-only macOS
-backend accepts the adapter's `"macOS-universal"` target but `monitors()` fails
-with exit status 3 and `UNSUPPORTED_PLATFORM` JSON on stderr. It does not query
-macOS displays.
+Windows 11, x64** (pass `"Windows-x64"`) and **macOS 11+**, Apple Silicon and
+Intel (pass `"macOS-universal"`). Windows ARM64, including x64 emulation, is
+not a support promise.
 
 ```4d
 var $display : cs.DisplayScale.Display
@@ -37,7 +35,8 @@ Successful calls return `{ok:true,stdout:Text,stderr:Text,exitCode:0,value:Objec
 
 ```json
 {
-  "protocol": 1,
+  "protocol": 2,
+  "platform": "windows",
   "monitors": [{
     "device": "\\\\.\\DISPLAY1",
     "primary": true,
@@ -48,7 +47,36 @@ Successful calls return `{ok:true,stdout:Text,stderr:Text,exitCode:0,value:Objec
 }
 ```
 
-This is an illustrative topology, not a fixed test expectation. Bounds are
+On macOS `platform` is `"macos"` and each monitor has no `dpi`; it has
+`bounds` in points, `backingPixels`/`nativePixels` (`{width,height}`),
+`backingScalePercent` and `scalePercent`:
+
+```json
+{
+  "protocol": 2,
+  "platform": "macos",
+  "monitors": [{
+    "device": "display-1",
+    "primary": true,
+    "bounds": {"left": 0, "top": 0, "right": 1800, "bottom": 1169},
+    "backingPixels": {"width": 3600, "height": 2338},
+    "nativePixels": {"width": 3024, "height": 1964},
+    "backingScalePercent": 200,
+    "scalePercent": 168
+  }]
+}
+```
+
+`scalePercent` is `nativePixels.width / (bounds.right - bounds.left) * 100`
+(effective UI size relative to physical panel pixels; non-integer for "More
+space"); `backingScalePercent` uses the current mode's backing pixels (200 for
+every Retina mode). macOS bounds are CoreGraphics global points, so they are not
+comparable with Windows physical-pixel bounds. `device` is
+`display-<CGDirectDisplayID>` for the current session only. Mirror sets are
+reported once. A missing native mode, no active display or topology churn is an
+error, never an assumed 100%.
+
+The Windows example above is an illustrative topology, not a fixed test expectation. Bounds are
 physical desktop pixel coordinates in the helper's per-monitor-aware context;
 left/top can be negative. `dpi` is the effective DPI applied to a helper-owned
 window on that monitor, **not raw physical panel DPI**. `scalePercent` is

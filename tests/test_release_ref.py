@@ -151,7 +151,7 @@ class ReleaseRefTests(unittest.TestCase):
         self.assertEqual(ci.count("uses: actions/checkout@v4"), 4)
         self.assertEqual(ci.count("ref: ${{ inputs.source_sha || github.sha }}"), 4)
         self.assertEqual(ci.count("&& !inputs.release_call"), 5)
-        self.assertIn("assemble --local-development", ci)
+        self.assertNotIn("--local-development", ci)
         self.assertIn("Fail closed pending pinned Windows runtime", release)
         self.assertIn("workflow_dispatch:", ci)
         self.assertIn("workflow_dispatch:", release)

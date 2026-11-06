@@ -122,8 +122,8 @@ def assemble(root=ROOT, local_development=False):
     manifests = []
     for target, path in zip(targets, inputs):
         status = verify(root, target, path)
-        if config.get("resource_targets") and status.get("execution") != "passed":
-            raise ValueError("explicit production/development resources require native CLI execution: " + target)
+        if status.get("execution") != "passed":
+            raise ValueError("production resources require native CLI execution: " + target)
         manifests.append(status)
     if config.get("resource_targets"):
         if destination.exists():

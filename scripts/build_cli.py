@@ -145,7 +145,7 @@ def build(root, target, language=None, cross=False):
         commands = [
             ["cmake", "-S", str(source), "-B", str(output / "cmake"),
              "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_CXX_STANDARD=17", "-DCMAKE_CXX_EXTENSIONS=OFF",
-             *(["-DBUILD_TESTING=ON"] if config.get("resource_targets") == ["windows-x64"] else []),
+             "-DBUILD_TESTING=ON",
              *architecture_options],
             ["cmake", "--build", str(output / "cmake"), "--config", "Release"],
         ]
@@ -189,7 +189,7 @@ def build(root, target, language=None, cross=False):
         smoke_test(executable, config["version"], contract,
                    unsupported_backend=platform.system() in config.get("unsupported_backend_platforms", []))
     helpers = []
-    if selected == "cpp" and target == native and config.get("resource_targets") == ["windows-x64"]:
+    if selected == "cpp" and target == native:
         helper_name = config["cli"] + "-test-echo" + (".exe" if target == "windows-x64" else "")
         candidates = [output / "cmake" / helper_name, output / "cmake/Release" / helper_name]
         helper = next((path for path in candidates if path.is_file() and not path.is_symlink()), None)

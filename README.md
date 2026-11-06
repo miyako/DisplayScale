@@ -1,7 +1,8 @@
 # DisplayScale
 
 A **real 4D component** wrapping a C++ CLI to read the effective display scaling
-currently applied to each monitor on **Windows 10 1703+ / Windows 11 x64**.
+currently applied to each monitor on **Windows 10 1703+ / Windows 11 x64** and
+**macOS 11+** (Apple Silicon and Intel).
 Read-only, on demand, with no visible UI or changes to the 4D host's DPI awareness.
 This is not a native 4D plug-in.
 
@@ -16,7 +17,7 @@ No untested older 4D compatibility is promised.
 ```4d
 var $display : cs.DisplayScale.Display
 var $result; $monitor : Object
-$display:=cs.DisplayScale.Display.new("Windows-x64")
+$display:=cs.DisplayScale.Display.new(Is Windows ? "Windows-x64" : "macOS-universal")
 $result:=$display.monitors()
 If ($result.ok)
   For each ($monitor; $result.value.monitors)
@@ -33,6 +34,11 @@ Failures retain diagnostics/status and never return partial lists or silently
 assume 100%. Calls are synchronous with a 30-second timeout and fresh helper
 state. `version()` checks the bundled CLI version.
 
+`value` is `{protocol:2,platform:"windows"|"macos",monitors:[...]}`. Monitor fields
+differ by `platform`; `bounds` are **not comparable across platforms**.
+
+Windows (`platform:"windows"`):
+
 | Field | Meaning |
 | --- | --- |
 | `device` | `MONITORINFOEXW.szDevice` identity for the current session/topology, not a permanent hardware GUID |
@@ -48,7 +54,25 @@ pending custom scaling, panel physical DPI or a resolution ratio.
 Results are primary first, then device-sorted. Enumeration indices are **not**
 Windows Settings display numbers or 4D screen numbers.
 
-No macOS feature support, Windows ARM64 promise, settings writes, automatic
+macOS (`platform:"macos"`), CoreGraphics only:
+
+| Field | Meaning |
+| --- | --- |
+| `device` | `display-<CGDirectDisplayID>`; valid for the current session/topology, not a permanent hardware ID |
+| `primary` | `CGMainDisplayID` display |
+| `bounds` | `CGDisplayBounds` in global **points** (origin top-left of the main display, y down) |
+| `backingPixels` | `width`/`height` in pixels of the current display mode |
+| `nativePixels` | `width`/`height` of the panel's native mode (`kDisplayModeNativeFlag`) |
+| `backingScalePercent` | `backingPixels.width / (right - left) * 100`: 200 for any Retina mode |
+| `scalePercent` | `nativePixels.width / (right - left) * 100`: effective UI size relative to physical pixels |
+
+A default Retina laptop (3024-px panel, 1512-pt mode) reports 200%; with "More
+space" (1800 pt) it reports 168% while `backingScalePercent` stays 200. There is
+no `dpi` on macOS. Mirror sets appear once (`CGGetActiveDisplayList`). If no
+native mode is identifiable or no display is active (headless/locked remote
+session), the CLI fails with `MACOS_API_ERROR`/`NO_MONITORS`; it never assumes 100%.
+
+No Windows ARM64 promise, settings writes, automatic
 event subscription, caching or 4D-window mapping. Remote/headless sessions expose
 their own desktop topology, not necessarily physical monitors attached to the
 console. No monitors and detected topology churn are explicit errors.
@@ -72,16 +96,16 @@ promise arbitrary custom percentages.
 [GetDpiForMonitor](https://learn.microsoft.com/en-us/windows/win32/api/shellscalingapi/nf-shellscalingapi-getdpiformonitor)
 warns against calling it from a per-monitor-aware thread; it is not this backend.
 
-Strict UTF-8, protocol 1, **one JSON object plus LF**, including on Windows:
+Strict UTF-8, protocol 2, **one JSON object plus LF**, including on Windows:
 
 | Command | Exit | Streams |
 | --- | --- | --- |
-| `display-scale monitors` | 0 | stdout `{"protocol":1,"monitors":[...]}`; empty stderr |
-| `display-scale --version` | 0 | stdout `{"protocol":1,"version":"0.1.0"}`; empty stderr |
+| `display-scale monitors` | 0 | stdout `{"protocol":2,"platform":"windows"|"macos","monitors":[...]}`; empty stderr |
+| `display-scale --version` | 0 | stdout `{"protocol":2,"version":"0.1.0"}`; empty stderr |
 | Invalid arguments | 2 | empty stdout; versioned error JSON on stderr |
 | Unsupported platform, API/awareness/topology/no-monitor failure | 3 | empty stdout; versioned error JSON on stderr |
 
-Error form: `{"protocol":1,"error":{"code":"CODE","message":"diagnostic"}}`.
+Error form: `{"protocol":2,"error":{"code":"CODE","message":"diagnostic"}}`.
 The 4D generic adapter reports nonzero status as `cli_error`, preserving that
 JSON on stderr and in `error.message`. No shell, undocumented DisplayConfig DPI
 packets, registry heuristics or fallback DPI. Generic process/quoting
@@ -98,16 +122,19 @@ Compiler/runtime redistribution terms still require review.
 ```sh
 python3 -m unittest discover -s tests -v
 python3 scripts/generate_icons.py --check
-python3 scripts/build_cli.py --root . --target windows-x64
+python3 scripts/build_cli.py --root . --target windows-x64   # on Windows x64
+python3 scripts/build_cli.py --root . --target macos-arm64   # or macos-x64, natively
 ```
 
 Windows builds/tests must execute on native Windows x64. Hosted runner tests
 check **only that runner's actual topology**, not mixed-scale/custom/RDP physical
-scenarios. Platform-independent conversion/error/protocol tests also run on
-macOS using an explicit `UNSUPPORTED_PLATFORM` backend. Test-only argument echo
+scenarios. Platform-independent conversion/error/protocol tests use fake backends on both
+platforms; the macOS CLI tests observe the real active displays of the runner.
+Test-only argument echo
 helpers are never packaged. Follow [manual Windows acceptance](tests/manual-windows.md)
 for mixed 100/125/150%, custom scaling, session changes, reconnects, negative
-coordinates and Remote Desktop.
+coordinates and Remote Desktop, and [manual macOS acceptance](tests/manual-macos.md)
+for built-in/external/mirrored displays and "More space".
 
 The native Windows job additionally runs `python scripts/check_windows_runtime.py`.
 It verifies the generated Release|x64 MSVC project selects retail static `/MT`,
@@ -123,33 +150,33 @@ The scaling import may be `SHCORE.dll` or the verified exact OS API-set contract
 [API sets identify Windows loader contracts, not redistributable files](https://learn.microsoft.com/en-us/windows/win32/apiindex/windows-apisets).
 No blanket API-set prefix or VC runtime DLL allowlist is used.
 
-Local macOS 4D source/compiler/compiled-package checks exercise protocol
-validation, generic execution and the unsupported-platform error, **not Windows
-monitor detection**. Development artifacts are not installable production
-releases. Production packaging requires current Windows resources/provenance,
-real compilation and the unpacked final compiled package's host acceptance.
-Signing is optional; no credentials, activation or signing is needed for
-unsigned local tool4d compilation.
+Local macOS 4D checks exercise the real macOS backend on the observed display
+topology; they say nothing about Windows monitor detection. Production
+packaging requires same-commit native CLI artifacts for `macos-x64`,
+`macos-arm64` and `windows-x64` (C++ cannot be cross-built), a universal macOS
+resource, real compilation and the unpacked final compiled package's host
+acceptance. Signing is optional; no credentials, activation or signing is needed
+for unsigned local tool4d compilation. Unsigned macOS executables downloaded
+from a release may be blocked by Gatekeeper/quarantine; notarization is not
+configured for this component.
 
-On native Apple Silicon, explicitly select the development profile:
+On native Apple Silicon, a partial local run (no Intel or Windows evidence) is:
 
 ```sh
 python3 scripts/ci_config.py download-tool4d --root .
-python3 scripts/accept_local.py --root . --repository miyako/DisplayScale \
-  --tool4d .tools/tool4d.app/Contents/MacOS/tool4d --local-development
+python3 scripts/build_cli.py --root . --target macos-arm64
+python3 scripts/test_4d.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
+python3 scripts/compile_component.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
 ```
 
-This builds the native unsupported backend, tests a real source host, compiles,
-packs and tests the actual unpacked compiled package. Output:
-`dist/development/DisplayScale.zip` with adjacent
-`DisplayScale.acceptance.json`; `build/acceptance.json` records the latest
-attempt. The ZIP includes an explicit DEVELOPMENT marker and no Windows
-resource. It is **not** the production `dist/DisplayScale.zip` and remains
-`release_ready:false`. No C++ cross-build is attempted.
+(`test_4d.py` needs the native binary under `component/DisplayScale/Resources/bin/macOS/`.)
+`scripts/accept_local.py` additionally requires the `macos-x64` and `windows-x64`
+artifacts and manifests from native CI for the same commit, and its result stays
+`release_ready:false` until every required check has actually run.
 
 The release workflow is deliberately fail-closed until real Windows 4D source
 and compiled-package host acceptance is integrated. A green CLI job or macOS
-unsupported-backend host check is not release readiness. No release/tag is
+host check is not release readiness. No release/tag is
 created by build or package commands.
 
 Concrete remaining automation blockers: `package.json.tool` pins only macOS ARM64
