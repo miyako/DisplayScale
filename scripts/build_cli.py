@@ -186,8 +186,7 @@ def build(root, target, language=None, cross=False):
         contract = root / "tests/cli-contract.json"
         if not contract.is_file():
             raise ValueError("tests/cli-contract.json is required; define feature smoke vectors")
-        smoke_test(executable, config["version"], contract,
-                   unsupported_backend=platform.system() in config.get("unsupported_backend_platforms", []))
+        smoke_test(executable, config["version"], contract)
     helpers = []
     if selected == "cpp" and target == native:
         helper_name = config["cli"] + "-test-echo" + (".exe" if target == "windows-x64" else "")

@@ -1,6 +1,7 @@
 name: CI
 on:
   push:
+    branches: ['**']
   pull_request:
   workflow_dispatch:
   workflow_call:
@@ -101,17 +102,9 @@ jobs:
           python-version: '3.12'
       - uses: actions/download-artifact@v4
         with:
-          name: cli-macos-x64
-          path: build/macos-x64
-      - uses: actions/download-artifact@v4
-        with:
-          name: cli-macos-arm64
-          path: build/macos-arm64
-      - uses: actions/download-artifact@v4
-        with:
           name: cli-windows-x64
           path: build/windows-x64
-      - name: Assemble production universal macOS and Windows x64 resources with same-source native manifests
+      - name: Assemble production Windows x64 resource with same-source native manifest
         id: assemble
         run: python scripts/ci_config.py assemble
       - uses: actions/upload-artifact@v4
@@ -120,7 +113,55 @@ jobs:
           path: ${{ steps.assemble.outputs.resources }}
           if-no-files-found: error
           retention-days: 7
-  macos-host:
+  windows-host:
+    needs: [configuration, native]
+    if: needs.configuration.outputs.initialized == 'true' && vars.FOURD_ENABLED == 'true' && github.ref_type != 'tag' && !inputs.release_call
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: bash
+    env:
+      TOOL4D_URL: ${{ vars.TOOL4D_URL }}
+      TOOL4D_SHA256: ${{ vars.TOOL4D_SHA256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-windows-x64
+          path: build/windows-x64
+      - name: Download pinned free native Windows x64 tool4D
+        run: python scripts/ci_config.py download-tool4d
+      - name: Source host, x86_64 compile, package and final compiled-ZIP host on native Windows 4D
+        run: >-
+          python scripts/accept_hosted.py --repository "$GITHUB_REPOSITORY"
+          --tool4d .tools/tool4d/tool4d.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compiled-component
+          path: |
+            dist/*.zip
+            dist/*.acceptance.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Retain source, compiler and final-host diagnostics even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: component-acceptance-diagnostics
+          path: |
+            build/hosted-acceptance.json
+            build/source-host-status.json
+            build/compile-status.json
+            build/compiled-host-status.json
+            build/host-status.json
+          if-no-files-found: warn
+          retention-days: 30
+  development-host:
     needs: [configuration, native]
     if: needs.configuration.outputs.initialized == 'true' && vars.FOURD_ENABLED == 'true' && github.ref_type != 'tag' && !inputs.release_call
     runs-on: macos-15
@@ -133,18 +174,10 @@ jobs:
           python-version: '3.12'
       - uses: actions/download-artifact@v4
         with:
-          name: cli-macos-x64
-          path: build/macos-x64
-      - uses: actions/download-artifact@v4
-        with:
           name: cli-macos-arm64
           path: build/macos-arm64
-      - uses: actions/download-artifact@v4
-        with:
-          name: cli-windows-x64
-          path: build/windows-x64
-      - name: Assemble production resources from same-commit native artifacts
-        run: python scripts/ci_config.py assemble
+      - name: Assemble macOS DEVELOPMENT package (not production release resources)
+        run: python scripts/ci_config.py assemble --local-development
       - name: Download pinned free tool4D for optional branch and PR integration tests
         if: vars.FOURD_ENABLED == 'true' && github.ref_type != 'tag' && !inputs.release_call
         env:
@@ -166,14 +199,15 @@ jobs:
           from ci_config import ROOT, load_config
           from package_component import package, unpack_for_test
           config = load_config(initialized=True)
-          archive = package(ROOT, repository=os.environ["GITHUB_REPOSITORY"], tag="v" + config["version"])
+          archive = package(ROOT, repository=os.environ["GITHUB_REPOSITORY"], tag=config["version"],
+                            local_development=True)
           component = unpack_for_test(ROOT, archive)
           subprocess.run([sys.executable, "scripts/test_4d.py", "--tool4d",
                           ".tools/tool4d.app/Contents/MacOS/tool4d",
                           "--component", str(component)], check=True)
       - uses: actions/upload-artifact@v4
         with:
-          name: macos-host-tested-package
-          path: dist/*.zip
+          name: development-unsupported-backend
+          path: dist/development/*.zip
           if-no-files-found: error
           retention-days: 7

@@ -17,6 +17,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
+from contextlib import redirect_stderr, redirect_stdout
 import build_cli
 import accept_local
 import ci_config
@@ -129,14 +130,14 @@ class DeliveryTests(unittest.TestCase):
 
     def package(self, **options):
         return package_component.package(
-            self.root, repository="owner/example-component", tag="v0.1.0", **options)
+            self.root, repository="owner/example-component", tag="0.1.0", **options)
 
     def test_uninitialized_fails_and_has_no_native_jobs(self):
         self.config.update(initialized=False, repository="4d-component-template", language=None)
         self.write_config()
         self.assertEqual(ci_config.matrix(ci_config.load_config(self.root)), {"include": []})
         with self.assertRaisesRegex(ValueError, "initialize"):
-            package_component.package(self.root, repository="owner/4d-component-template", tag="v0.1.0")
+            package_component.package(self.root, repository="owner/4d-component-template", tag="0.1.0")
 
     def test_matrix_only_selected_language(self):
         for language in ("go", "rust", "cpp"):
@@ -234,15 +235,33 @@ class DeliveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Windows x64 only"):
             ci_config.load_config(self.root)
 
-    def test_windows_release_is_blocked_even_with_hosted_opt_in(self):
+    def test_windows_release_requires_hosted_opt_in_and_native_windows_tool4d_pin(self):
         self.windows_scope()
-        environment = {"GITHUB_REPOSITORY": "owner/example-component", "FOURD_ENABLED": "true"}
-        with patch.dict(os.environ, environment, clear=True), patch.object(
-                sys, "argv", ["ci_config.py", "validate", "--release", "--tag", "v0.1.0",
-                              "--root", str(self.root)]):
-            with self.assertRaises(SystemExit) as caught:
+        pin = {"platform": "win", "branch": "20.x", "version": "20.7", "build": "101905", "arch": "x64",
+               "sha256": "31d5300ca38df9b18b32c07835ab9b1e1cf0deee6c936a382581723ed0edd4dc"}
+
+        def validate(enabled, tool_windows):
+            metadata = {"name": self.config["repository"], "version": self.config["version"]}
+            if tool_windows is not None:
+                metadata["tool_windows"] = tool_windows
+            (self.root / "package.json").write_text(json.dumps(metadata), encoding="utf-8")
+            environment = {"GITHUB_REPOSITORY": "owner/example-component"}
+            if enabled:
+                environment["FOURD_ENABLED"] = "true"
+            with patch.dict(os.environ, environment, clear=True), patch.object(
+                    sys, "argv", ["ci_config.py", "validate", "--release", "--tag", "0.1.0",
+                                  "--root", str(self.root)]), redirect_stdout(io.StringIO()):
                 ci_config.main()
+
+        for enabled, tool_windows in ((True, None), (False, pin), (True, {**pin, "platform": "mac"}),
+                                      (True, {**pin, "arch": "arm"}), (True, {**pin, "sha256": "0" * 63})):
+            with self.subTest(enabled=enabled, tool_windows=tool_windows), self.assertRaises(SystemExit) as caught, \
+                    redirect_stderr(io.StringIO()):
+                validate(enabled, tool_windows)
             self.assertEqual(caught.exception.code, 2)
+        validate(True, pin)
+        self.assertEqual(ci_config.tool_pin(self.root, "windows-x64")[0],
+                         "https://resources-download.4d.com/release/20.x/20.7/101905/win/tool4d_win.tar.xz")
 
     def test_platform_cli_vectors_do_not_claim_darwin_feature_success(self):
         contract = self.root / "contract.json"
@@ -330,7 +349,7 @@ class DeliveryTests(unittest.TestCase):
 
     def test_wrong_repository(self):
         with self.assertRaisesRegex(ValueError, "actual repository"):
-            package_component.package(self.root, repository="owner/wrong", tag="v0.1.0")
+            package_component.package(self.root, repository="owner/wrong", tag="0.1.0")
 
     def test_wrong_package_name(self):
         (self.root / "package.json").write_text('{"name":"wrong"}', encoding="utf-8")
@@ -374,7 +393,7 @@ class DeliveryTests(unittest.TestCase):
             self.write_config()
 
     def test_bad_tag_or_semver(self):
-        for tag in ("0.1.0", "v0.2.0", "v0.1.0/../../escape"):
+        for tag in ("v0.1.0", "0.2.0", "0.1.0/../../escape", "20R3.2"):
             with self.subTest(tag=tag), self.assertRaisesRegex(ValueError, "tag"):
                 package_component.package(self.root, repository="owner/example-component", tag=tag)
         for version in ("01.1.0", "0.1", "0.1.0-01", "0.1.0\n", "0.1.0/escape"):
@@ -596,7 +615,7 @@ class DeliveryTests(unittest.TestCase):
 
     def test_release_requires_opt_in(self):
         environment = {
-            "GITHUB_REPOSITORY": "owner/example-component", "GITHUB_REF_NAME": "v0.1.0",
+            "GITHUB_REPOSITORY": "owner/example-component", "GITHUB_REF_NAME": "0.1.0",
             "FOURD_ENABLED": "false",
         }
         with patch.dict(os.environ, environment, clear=True), patch.object(
@@ -609,7 +628,7 @@ class DeliveryTests(unittest.TestCase):
         environment = {"GITHUB_REPOSITORY": "owner/example-component",
                        "GITHUB_REF_NAME": "main", "FOURD_ENABLED": "true"}
         with patch.dict(os.environ, environment, clear=True), patch.object(
-                sys, "argv", ["ci_config.py", "validate", "--release", "--tag", "v0.1.0",
+                sys, "argv", ["ci_config.py", "validate", "--release", "--tag", "0.1.0",
                               "--root", str(self.root)]):
             ci_config.main()
 
@@ -621,15 +640,15 @@ class DeliveryTests(unittest.TestCase):
             archive.writestr(info, data)
         return output.getvalue()
 
-    def download(self, data, digest=None, final_url="https://resources-download.4d.com/fixed/tool4d.zip"):
+    def download(self, data, digest=None, final_url=None):
         response = io.BytesIO(data)
-        response.geturl = lambda: final_url
+        response.geturl = lambda: final_url or "https://resources-download.4d.com/fixed/tool4d.zip"
         environment = {
             "TOOL4D_URL": "https://resources-download.4d.com/fixed/tool4d.zip",
             "TOOL4D_SHA256": digest or hashlib.sha256(data).hexdigest(),
         }
         with patch.dict(os.environ, environment, clear=True), patch.object(
-                ci_config.urllib.request, "urlopen", return_value=response):
+                ci_config, "open_tool4d_url", return_value=response):
             return ci_config.download_tool4d(self.root)
 
     def test_official_https_archive_cdn_redirect_preserves_pinned_sha256(self):
@@ -668,6 +687,35 @@ class DeliveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "already exists"):
             self.download(self.archive_bytes("tool4d.app/Contents/MacOS/tool4d"))
         self.assertEqual(executable.read_bytes(), b"tool4d")
+
+    def test_official_vendor_cdn_redirect_keeps_pinned_hash_requirement(self):
+        data = self.archive_bytes("tool4d.app/Contents/MacOS/tool4d")
+        with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
+            self.download(data, "0" * 64, "https://builds2.4d.com/fixed.tar.xz?Expires=123")
+        executable = self.download(data, final_url="https://builds2.4d.com/fixed.tar.xz?Expires=123")
+        self.assertEqual(executable.read_bytes(), b"tool4d")
+
+    def test_unapproved_or_non_https_vendor_redirect_fails_closed(self):
+        data = self.archive_bytes("tool4d.app/Contents/MacOS/tool4d")
+        for url in ("http://builds2.4d.com/tool", "https://untrusted.invalid/tool",
+                    "https://builds2.4d.com.untrusted.invalid/tool",
+                    "https://user@builds2.4d.com/tool", "https://builds2.4d.com:8443/tool"):
+            with self.subTest(url=url), self.assertRaisesRegex(ValueError, "official HTTPS"):
+                self.download(data, final_url=url)
+
+    def test_redirect_handler_rejects_every_unapproved_hop_before_following(self):
+        handler = ci_config.Tool4DRedirectHandler()
+        request = ci_config.urllib.request.Request("https://resources-download.4d.com/fixed/tool4d")
+        for url in ("http://builds2.4d.com/tool", "https://untrusted.invalid/tool",
+                    "https://user@builds2.4d.com/tool", "https://builds2.4d.com:8443/tool"):
+            with self.subTest(url=url), patch.object(
+                    ci_config.urllib.request.HTTPRedirectHandler, "redirect_request") as follow:
+                with self.assertRaisesRegex(ValueError, "official HTTPS"):
+                    handler.redirect_request(request, None, 302, "Found", {}, url)
+                follow.assert_not_called()
+        redirect = handler.redirect_request(request, None, 302, "Found", {},
+                                            "https://builds2.4d.com/fixed.tar.xz?Expires=123")
+        self.assertEqual(redirect.full_url, "https://builds2.4d.com/fixed.tar.xz?Expires=123")
 
     def test_tool4d_digest_and_unsafe_zip_rejected(self):
         with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):

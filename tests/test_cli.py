@@ -88,7 +88,7 @@ class CppCLI(unittest.TestCase):
         self.assertEqual(result.stderr, stderr)
 
     def test_version(self):
-        self.assert_result(["--version"], 0, b'{"protocol":2,"version":"0.1.0"}\n', b"")
+        self.assert_result(["--version"], 0, b'{"protocol":2,"version":"0.1.3"}\n', b"")
 
     def test_pure_backend(self):
         result = subprocess.run(["ctest", "--test-dir", str(self.build), "-C", "Release",

@@ -23,5 +23,7 @@ exitCode is abnormal termination, not zero.
 
 Creation errors use `_CaptureError` and restore `Method called on error(ek local)`
 immediately afterward. Diagnostic `Last errors` are returned, not swallowed.
+`_CaptureError` alone declares the `CLI_LastErrors` process variable; callers
+use `_CaptureError("reset")` and `_CaptureError("take")` instead of touching it.
 There is no shared async queue/PID map or global handler. For binary feature
 protocols, add a deliberately separate Blob mode rather than corrupting UTF-8 text.

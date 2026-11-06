@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resolve only existing version tags, then detect movement before publication."""
+"""Validate release references and fail closed on publication collisions."""
 import argparse
 import os
 from pathlib import Path
@@ -7,12 +7,13 @@ import re
 import subprocess
 import sys
 
-from ci_config import ROOT, SEMVER
+from ci_config import ROOT, SEMVER, load_config
 
 
 def validate_tag(tag):
-    if not isinstance(tag, str) or not re.fullmatch("v" + SEMVER, tag, flags=re.ASCII):
-        raise ValueError("release tag must be v<SemVer>, not a branch or arbitrary ref")
+    if not isinstance(tag, str) or not re.fullmatch(SEMVER, tag, flags=re.ASCII):
+        raise ValueError("release tag must be prefix-free SemVer (for example 0.1.0), "
+                         "not v-prefixed or an arbitrary ref")
     return tag
 
 
@@ -37,6 +38,51 @@ def verify(root, tag, expected_sha):
     if sha != expected_sha:
         raise ValueError("release tag moved: it no longer points to the expected commit")
     return sha
+
+
+def require_main(env=None):
+    env = os.environ if env is None else env
+    if env.get("GITHUB_EVENT_NAME") != "workflow_dispatch" or env.get("GITHUB_REF") != "refs/heads/main":
+        raise ValueError("Publish must be manually dispatched on main")
+
+
+def available(root, repository, tag):
+    """Only an explicit API 404 means absent; transport/auth failures stop."""
+    validate_tag(tag)
+    load_config(root, initialized=True, repository=repository, tag=tag)
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_-]+", repository, re.ASCII):
+        raise ValueError("invalid GitHub repository identity")
+    for resource in ("git/ref/tags/", "releases/tags/"):
+        result = subprocess.run(
+            ["gh", "api", "--include", "repos/" + repository + "/" + resource + tag],
+            cwd=root, capture_output=True, text=True, encoding="utf-8", check=False)
+        status = re.match(r"HTTP/[0-9.]+ ([0-9]{3})[ \r\n]", result.stdout)
+        if status and status[1] == "200" and result.returncode == 0:
+            raise ValueError("release tag or GitHub release already exists: " + tag)
+        if not (status and status[1] == "404" and result.returncode == 1):
+            raise ValueError("cannot establish release availability: " + (result.stderr.strip() or result.stdout))
+
+
+def create_tag(root, repository, tag, revision):
+    require_main()
+    if not isinstance(revision, str) or not re.fullmatch(r"[0-9a-f]{40}", revision, re.ASCII):
+        raise ValueError("tag creation requires the full normalized accepted commit SHA")
+    available(root, repository, tag)
+    subprocess.run(["git", "fetch", "--no-tags", "origin",
+                    "+refs/heads/main:refs/remotes/origin/main"], cwd=root, check=True)
+    subprocess.run(["git", "merge-base", "--is-ancestor", revision, "refs/remotes/origin/main"],
+                   cwd=root, check=True)
+    # Creating a reference atomically rejects even a racing identical-SHA tag.
+    subprocess.run(["gh", "api", "--method", "POST", "repos/" + repository + "/git/refs",
+                    "-f", "ref=refs/tags/" + tag, "-f", "sha=" + revision],
+                   cwd=root, check=True, capture_output=True, text=True, encoding="utf-8")
+    subprocess.run(["git", "fetch", "--no-tags", "origin",
+                    "refs/tags/" + tag + ":refs/tags/" + tag], cwd=root, check=True)
+    result = subprocess.run(["git", "ls-remote", "--exit-code", "origin", "refs/tags/" + tag],
+                            cwd=root, check=True, capture_output=True, text=True, encoding="utf-8")
+    if result.stdout.strip() != revision + "\trefs/tags/" + tag:
+        raise ValueError("remote release tag does not match the accepted commit")
+    verify(root, tag, revision)
 
 
 def resolve(root, *, event, ref_type="", ref_name="", version_tag="", event_sha=""):
@@ -66,9 +112,16 @@ def main():
     verifier = commands.add_parser("verify")
     verifier.add_argument("--tag", required=True)
     verifier.add_argument("--expected-sha", required=True)
+    availability = commands.add_parser("available")
+    availability.add_argument("--repository", required=True)
+    availability.add_argument("--tag", required=True)
     args = parser.parse_args()
     try:
-        if args.command == "verify":
+        if args.command == "available":
+            require_main()
+            available(args.root, args.repository, args.tag)
+            print("Release tag and GitHub release are available.")
+        elif args.command == "verify":
             verify(args.root, args.tag, args.expected_sha)
             print("Release tag still points to the expected commit.")
         else:

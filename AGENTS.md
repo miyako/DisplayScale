@@ -10,12 +10,29 @@ The [README](README.md), [feature contract](component/DisplayScale/Documentation
 [manual Windows checks](tests/manual-windows.md) and [manual macOS checks](tests/manual-macos.md)
 define this destination: effective display scaling on Windows 10 1703+ / Windows
 11 x64 and macOS 11+ (CoreGraphics backend, protocol 2), read-only/on demand.
-Production resources are a universal macOS CLI plus Windows x64, assembled from
-same-commit native artifacts; C++ cannot be cross-built. Preserve all
+Production release resources remain **Windows x64 only**; the macOS backend is
+exercised through the explicit local/CI `--local-development` macOS profile
+(thin native CLI, DEVELOPMENT package that is never a release) until a macOS
+release pipeline (universal resource, macOS 4D host, Publish integration) is
+approved. C++ cannot be cross-built. Preserve all
 same-source/provenance, real compiler, source-stripping and final unpacked-host
 gates. Windows CLI CI, Windows 4D host acceptance and physical/manual topology
-acceptance are distinct. Release publication remains blocked until the required
-Windows host integration exists; never substitute macOS host checks for Windows.
+acceptance are distinct. Windows 4D host acceptance runs on native `windows-2022`
+with the pinned `package.json.tool_windows` tool4d (x86_64-only compile); never
+substitute macOS error-path checks or ARM64-emulated Windows runs.
+
+The template's patch/minor/major **Publish** workflow is ported with these
+DisplayScale deviations, which override the generic Publish text below:
+`ci.yml` runs `accept_hosted.py` only in its native Windows `windows-host` job
+(plus the optional macOS development backend); Publish's `version` job requires
+`FOURD_ENABLED=true` and the Windows tool4d pin at
+`ci_config.py validate --release`, before any commit, tag or release, and its
+`compile` job runs on `windows-2022`; it has
+no `require_apple_signing` input, uses no Apple secrets, downloads no macOS
+CLI and rejects a signing-required `release-policy.json`. `bump_release.py`
+also updates `cli/display.hpp`, the `Display.4dm` version check and the
+`x.y.z.0` Windows manifest identity. A Windows-only release requires
+`windows_4d` passed and exactly `x86_64_generic` compiler targets.
 
 The fixed tool4d download may redirect from `resources-download.4d.com` to the
 verified exact official HTTPS archive hostname `builds2.4d.com`. Accept only
@@ -65,6 +82,35 @@ produce `cs.AcmeHello.Greeting` in a host; component-internal code uses
 `cs.Greeting`, **not** the host namespace. Do not invent an exported-class list:
 the namespace shares component classes. Underscore names are internal
 **by convention**, not access control.
+
+### Component release tags: no `v` prefix
+
+Component versions and new release tags must be identical prefix-free SemVer:
+`0.1.0`, **not** `v0.1.0`. Publish emits stable `X.Y.Z`; package validation,
+signing proofs and publication reject prefixed tags rather than stripping them.
+This is the template's Dependency Manager release convention, not a rule for
+upstream GitHub Actions/toolchain tags or historical external release URLs.
+The resolver consumes the **tag**, not the GitHub release display title.
+
+The official [Follow 4D version reference](https://blog.4d.com/follow-4d-version-a-smarter-way-to-manage-your-dependencies/)
+specifies prefix-free, **host-version-aligned** tags: LTS `x.y.p`, e.g.
+`20.2.3` for the 4D 20.2 line, and R releases `xRy.p`, e.g. `20R3.2`.
+Ordinary component SemVer such as `0.1.0` does **not** activate or imply
+Follow4D compatibility. Host-aligned distribution is a separate deliberate
+versioning choice; this pipeline does not implement non-SemVer R-release tags
+and rejects them. Do not select Follow 4D version for ordinary component
+versions or infer compatibility from a tag alone. A custom display title does
+not excuse an incompatible tag format.
+
+Migration is read-only for published history: version planning considers the
+highest numeric stable version across both `X.Y.Z` and legacy `vX.Y.Z` tags,
+ignoring prerelease/build-metadata and unrelated tags. With no stable tag it
+bumps the configured version. It emits only a new prefix-free tag at the newly
+accepted version commit; do not rename, move, delete or automatically alias old
+tags/releases, or reuse their acceptance/signing evidence. Existing consumers
+pinned to old tags stay unchanged until explicitly migrated. Signing policy
+entries remain exact prefix-free versions; the policy is not rewritten or
+weakened during migration.
 
 ### Scope and stop rules
 
@@ -425,6 +471,10 @@ Supply both override values or neither; incomplete pairs fail. The explicit
 fixed flags above make this local command independent of repository variables. Require
 native-host compatibility and safe extraction: reject path traversal, escaping
 symlink chains, unsupported entries and checksum mismatch. Never bypass checks.
+The fixed download may redirect to the vendor's `builds2.4d.com` CDN; each hop
+is checked before following, allowing only those two exact HTTPS hosts without
+URL credentials or nonstandard ports. Signed CDN query strings are not compiler
+pins and never replace the fixed URL or archive SHA256.
 
 Run the actual stages (example version `0.1.0`, initialized destination only):
 
@@ -432,7 +482,7 @@ Run the actual stages (example version `0.1.0`, initialized destination only):
 python3 scripts/test_4d.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
 python3 scripts/compile_component.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
 python3 scripts/package_component.py --root . --repository OWNER/REPOSITORY \
-  --tag v0.1.0 --unpack-test
+  --tag 0.1.0 --unpack-test
 python3 scripts/test_4d.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d \
   --component build/release-test/REPOSITORY.4dbase
 ```
@@ -441,7 +491,8 @@ python3 scripts/test_4d.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/to
    `Components/`. The local dependency path names the package root, not the anchor.
    Source staging drops DerivedData to avoid interpreted tests loading stale
    compiled code. Isolated host/request/status paths include Unicode, spaces and
-   both quote characters on POSIX (quotes are invalid in Windows filenames);
+   both quote characters on POSIX (double quotes are invalid in Windows filenames;
+   the Windows fixture deliberately uses Unicode and spaces without either quote);
    copies reject symlinks. A renamed copy of the actual native CLI also verifies
    executable-path handling, not merely argument quoting. These tests require actual
    runtime execution on each OS to establish native quoting behavior.
@@ -463,6 +514,21 @@ python3 scripts/test_4d.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/to
    compiler or archive structure check is not evidence of real host loading.
 6. Recompile/repack/retest after any input or signing change. Never accept a
    stale `host-status.json` or result describing a different package.
+
+**Headless first-open "import components" dialog.** When 4D opens a project
+for the first time and that project has no `Project/Sources/dependencies.json`,
+it can show a modal "import components" dialog. Headless tool4d/4D runs (e.g.
+`--startup-method=Compile`) then block indefinitely until a person declines it;
+this was observed with 4D 21.0 opening `tooling/compiler/Project/compiler.4DProject`
+on Windows (issue #2). Prevent it by placing `Project/Sources/dependencies.json`
+**before** the project's first open, rather than relying on dismissal or timeouts.
+Existing examples: `tests/host/Project/Sources/dependencies.json` is
+`{"version":2100,"dependencies":{"DisplayScale":{}}}` and
+`component/DisplayScale/Project/Sources/dependencies.json` is
+`{"version":2100,"dependencies":{}}`, as is `tooling/compiler/Project/Sources/dependencies.json`. Any new or generated helper project
+(compiler, host fixture or staging copy) needs one, declaring only the
+components it really loads. A hang at first open is a dialog symptom, not a
+compiler or quoting failure.
 
 The isolated host's `Host_error` method writes raw `Last errors`, the failing
 phase, `success:false` and `finished:false` on an unexpected runtime abort.
@@ -489,27 +555,68 @@ failed status/phase reports. This is a starter identity/wiring regression,
 `--tag` validates package/version identity; it does not create/push/publish a tag.
 For approved hosted publication only, set Actions **variable**
 `FOURD_ENABLED=true`; `TOOL4D_URL` / `TOOL4D_SHA256` are optional paired overrides
-of the approved public `package.json.tool` pin, not required secrets. Push the matching
-`v<version>` tag. Release jobs build same-tag native resources, compile after
+of the approved public `package.json.tool` pin, not required secrets. Use manual
+Publish on main with patch/minor/major; it commits synchronized version metadata
+and builds that exact SHA before creating its tag/release. Jobs compile after
 assembly and host-test the unpacked package before publishing `<repository>.zip`.
-Only publication receives built-in `GITHUB_TOKEN` write permission; no personal
-token/version-bot commit is required.
+Only the version and publication jobs receive built-in `GITHUB_TOKEN` write
+permission; no personal token is required. Branch rules must permit the bot's
+non-force main commit; rejection fails closed rather than bypassing protection.
 
-### Manual Actions dispatch and existing-tag release
+### Two workflows: CI and manual Publish
 
 After the dispatch-capable workflow is merged to the **default branch**, open
 **Actions → CI → Run workflow** and select a branch for ordinary validation.
 `FOURD_ENABLED` still controls optional hosted 4D steps; CLI-only green is not
 compiled-host green.
+Initialized branch/PR/manual CI with `FOURD_ENABLED=true` retains
+**compiled-component** for 30 days: the accepted `dist/<repository>.zip` and
+adjacent `.acceptance.json` bind the ZIP hash/size, revision, native manifests,
+tool4d identity and source/compiler/final compiled-host evidence. Download it
+from the run's **Artifacts** without publishing a release. Separate
+**component-acceptance-diagnostics** preserves completed reports on failure.
+`scripts/accept_hosted.py --repository OWNER/REPOSITORY --tool4d PATH` consumes
+all three same-revision native artifacts/manifests (each `execution:"passed"`),
+reassembles and runs the actual source/compile/package/final-host pipeline.
+It never publishes or marks unexecuted Intel/Windows 4D as passed. Its default
+inspection path is unsigned; release signing uses the explicit
+`--require-apple-signing` path documented below.
 
-**Actions → Release compiled component → Run workflow** requires
-`version_tag`, an **already existing** `v<SemVer>` tag matching the initialized
-repository's `template.json.version` / `package.json.version`. It creates no
-tag. The gate resolves/peels that tag to a commit SHA, validates source at that
-SHA, and all reusable native CI, assembly, compilation and publication jobs use
-that exact SHA—not the selected UI branch. Packaging receives the normalized
-tag explicitly. Publication refreshes and verifies the tag has not moved, uses
-`--verify-tag`, and remains blocked by compilation or final host failure.
+Keep exactly `.github/workflows/ci.yml` (**CI**) and `publish.yml` (**Publish**).
+**Actions → Publish → Run workflow** accepts **mode** patch/minor/major, default
+patch, and requires **main**. It does not accept or require an existing tag.
+`bump_release.py next --mode MODE` uses the highest stable `X.Y.Z` tag (including
+legacy `vX.Y.Z` history only as a migration baseline), ignoring prereleases and
+build metadata, or the configured version if no stable tag exists; it bumps that
+base (initial `0.1.0` becomes `0.1.1` with patch). Validate synchronized metadata
+and reject downgrades before writes. `apply --version X.Y.Z --stage` updates
+only the validated configured version surfaces: package/template,
+selected-language version declarations, current CLI/class docs and version
+contracts. It must not rewrite dependencies, history or arbitrary feature data.
+Feature adaptations adding version fields must extend this bounded registry.
+
+Publish uses concurrency group `publish`, `cancel-in-progress:false`, checks
+tag/release availability, commits version updates to main and passes that full
+SHA to reusable CI and all assembly/compiler/signing/publication checkouts.
+CI handles branch pushes, PRs and dispatch, never tags; the bot's `GITHUB_TOKEN`
+commit does not recursively trigger CI. Publish explicitly calls reusable CI
+with `release_call:true` to avoid a second optional compiled inspection.
+The same input commit must bind all native manifests and acceptance evidence.
+Signing policy is read at the version commit SHA. Manual
+`require_apple_signing` can escalate an unsigned version but cannot downgrade
+a policy-required signed version.
+Only after compilation and exact final-host success does `release_assets.py`
+verify downloaded ZIP/DMG/proof bytes, accepted hashes/sizes, revision, native
+manifests and full source/final-host contracts. It then verifies main ancestry,
+checks remote tag/release collisions again, atomically creates a new
+prefix-free `X.Y.Z` tag at the accepted SHA and invokes `gh release create --verify-tag`
+with a literal validated asset list. GitHub's create-ref API rejects collisions
+even at the same SHA; no force/update/delete operation is used.
+No automatic tag-push release trigger exists.
+Failed builds leave the main version commit, not a tag/release. Retrying with
+the same mode can reuse that candidate when the stable base is unchanged.
+A failure after tag push retains the tag and requires explicit inspection;
+never delete/force a tag, overwrite a release or pretend a failed stage passed.
 Do not manually dispatch publication or create a tag without user permission.
 The new workflow is not available in the default template before its PR merges.
 
@@ -578,9 +685,10 @@ For a requested local implementation, finish the feature, replace every
 greeting-specific surface, run exact feature/error tests, validate licenses and
 resources, compile fresh, and load the **exact final ZIP's** unpacked component.
 Report unsupported/unavailable checks as `not_run`; local success remains
-`release_ready:false`. Approved publication additionally requires the existing
-matching tag, all required native artifact/tests, hosted 4D opt-in and the final
-package-host gate. Signing is optional for the existing unsigned release.
+`release_ready:false`. Approved publication additionally requires a main-only
+version commit, all required native artifact/tests, hosted 4D opt-in and the final
+package-host gate. Signing is optional by default; a listed version or explicit signed dispatch
+requires every signing/notarization gate to pass before tag creation/publication.
 
 The final handoff must identify the repository/namespace/class/CLI/language,
 revision and input provenance, exact commands/results, tool versions, stable ZIP
@@ -615,6 +723,7 @@ cross-build or optional skipped workflow as passed.
 | Compiled loader crash / interpreted package | Verify explicit nested ZIP directory records, external native Libraries, source stripping and exact `Is compiled mode`; keep the established packer. |
 | Tool download/checksum/config failure | Check `package.json.tool` or complete overrides, official fixed URL and independently approved SHA256; do not fall back to `latest`, bypass the hash or redistribute vendor tools. |
 | Final host unfinished/failed | Stop and preserve status/phase/errors. A previous ZIP, successful compile or six completed cases cannot approve this run. |
+| Headless 4D hangs on first project open | Check for a modal "import components" dialog; ensure `Project/Sources/dependencies.json` exists before first open (§6). Do not add a dismissal hack or treat the hang as a compile failure. |
 
 ## 8. Icons, licensing and optional signing
 
@@ -639,21 +748,60 @@ Never claim this deterministic file-presence check is a legal audit.
 
 Signing is not a prerequisite for unsigned development/package acceptance.
 Gatekeeper/quarantine may still block unsigned downloads; do not add a runtime
-trust bypass. If the user explicitly opts into signing, store certificates and
-passwords in **secrets only**, use minimum entitlements, fail closed, require
-notarization `Accepted`, clean temporary keychains even on failure and test the
-final signed compiled package. Bare CLI executables cannot be stapled; a signed
-container/Apple `Contents/` layout requires deliberate packaging changes.
+trust bypass. The implemented signing path stores credentials in **secrets only**,
+uses hardened runtime/timestamp verification, fails closed, requires notarization
+`Accepted`, cleans temporary keychains/certificates and owned mounts even on
+failure, and tests the exact final signed ZIP's unpacked compiled component.
+Bare CLI executables are not stapled: the DMG is the notarized/stapled container.
+The ZIP is repacked from its actual final mounted component, preserving the
+existing `.4dbase` layout without introducing an application `Contents/` tree.
 
-### Seven Apple secrets: registration is not implementation
+### Version policy and seven Apple secrets
 
-The current `.github/workflows/release.yml` is **unsigned** and consumes **none**
-of these seven secrets. Merely registering them does **not** enable signing or
-notarization. Implementing a signing workflow is separate, explicitly approved
-scope; this playbook documents credential types, not an implemented integration.
-No secret below is required by the free local compiler or unsigned acceptance.
+`release-policy.json` is independent of template identity and is preserved by
+initialization. It defaults to
+`{"schema":1,"apple_notarized_versions":[]}`. List exact component versions
+without `v` to require signed releases; commit the policy before running Publish
+for that next version. A missing policy or unlisted version means unsigned, malformed
+policy fails closed. Manual release `require_apple_signing` and the helper's
+`--require-apple-signing` can only escalate, never downgrade policy.
+`scripts/sign_release.py policy --root .` emits `apple_signing` without accessing
+secrets; the workflow passes credentials only to the policy-true stage.
+Merely registering secrets does not change policy, and no secret below is
+required by the free local compiler, unsigned CI inspection or unsigned release.
 
-For a future approved integration, register private values in the **destination**
+The signed release runs the same verified native assembly, source-host,
+compilation and deterministic unsigned packaging pipeline, then tests the
+unsigned compiled ZIP. `sign_release.py sign --root . --require-apple-signing`
+requires the checkout HEAD to match candidate `RELEASE_SHA`/`RELEASE_TAG`,
+validates compiler input/output provenance and reproduces the fresh unsigned
+ZIP before signing an isolated copy. It signs the universal CLI and native
+Mach-O Libraries, verifies Developer ID/team/runtime/timestamp, signs a DMG,
+requires actual notarization JSON `Accepted`, staples and validates it, and
+rebuilds the final ZIP from that mounted final DMG. Original compiler outputs
+and markers are not edited. The source-host gate is enforced by the orchestrator;
+the helper does not pretend a source-host filename is its input contract.
+
+`accept_hosted.py --require-apple-signing` reruns actual host assertions against
+the final ZIP after signing. It revalidates original compiler provenance and
+binds all final asset hashes, refusing changes during host testing. Stable
+outputs are `dist/<repository>.zip`, `.dmg`, `-signing.json` and
+`.acceptance.json`; the latter contains distinct source/compiler/unsigned-host/
+signing/final-host evidence. Signing timestamps and notarization are not
+bit-for-bit reproducibility promises. Windows Authenticode is not implemented.
+Never claim a template fixture was Apple-signed using another destination's
+credentials or that a successful CLI/notary check proves native Intel/Windows
+4D loading or Dependency manager installation.
+The signing implementation and its mocked-tool tests originate from
+[miyako/UuidTest 7e0cfab](https://github.com/miyako/UuidTest/tree/7e0cfab983a582994e12c79c09aa47a205ea4bfc)
+after its [actual release run](https://github.com/miyako/UuidTest/actions/runs/41270374443)
+and public-download signing/stapling/final compiled-host verification succeeded.
+Its [public proof](https://github.com/miyako/UuidTest/releases/download/v0.1.0/UuidTest-signing.json)
+keeps `hostValidation:"required-after-signing"`; the separate final host report
+fulfills that requirement. Do not rewrite the helper's proof to pretend it ran
+the caller's host stage.
+
+For approved signed releases, register private values in the **destination**
 repository under **Settings → Secrets and variables → Actions → Secrets → New
 repository secret**. Template creation does not inherit repository secrets or
 variables. Never place certificates/private keys/passwords in source, workflow
