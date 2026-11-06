@@ -19,7 +19,6 @@ Function _decode($result : Object; $field : Text)->$decoded : Object
 	var $coordinate : Variant
 	var $primaryCount : Integer
 	var $fieldName : Text
-	var CLI_LastErrors : Collection
 	If (Not($result.ok))
 		return $result
 	End if

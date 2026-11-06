@@ -40,7 +40,6 @@ Function execute($file : 4D.File; $arguments : Collection)->$result : Object
 	var $options : Object
 	var $previous : Text
 	var $launchErrors : Collection
-	var CLI_LastErrors : Collection
 	var $worker : 4D.SystemWorker
 	If (($file=Null) | ($arguments=Null))
 		return New object("ok"; False; "error"; New object("code"; "invalid_argument"; "message"; "Executable File and arguments Collection are required"))
