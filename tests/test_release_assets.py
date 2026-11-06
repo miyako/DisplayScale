@@ -262,18 +262,16 @@ class ReleaseAssetsTests(unittest.TestCase):
         self.assertNotIn("shell", run.call_args.kwargs)
         self.assertNotIn("*.zip", arguments)
 
-    def test_windows_only_publish_never_receives_apple_secrets_or_signing_input(self):
+    def test_publish_always_signs_and_requires_windows_host_before_release(self):
         workflow = (ROOT / ".github/workflows/publish.yml").read_text()
-        self.assertIn("name: Source host, x86_64 compile, package and final compiled-ZIP host on native Windows 4D",
-                      workflow)
-        self.assertIn("runs-on: windows-2022", workflow)
-        self.assertIn("--tool4d .tools/tool4d/tool4d.exe", workflow)
-        self.assertNotIn("secrets.", workflow)
-        self.assertNotIn("require_apple_signing", workflow)
-        self.assertNotIn("--require-apple-signing", workflow)
-        self.assertNotIn("cli-macos-", workflow)
-        self.assertIn("if: steps.signing_policy.outputs.apple_signing != 'false'", workflow)
-        self.assertLess(workflow.index("Reject Apple signing"), workflow.index("git commit"))
+        self.assertIn("sign_release.py policy --root . --require-apple-signing", workflow)
+        self.assertIn("--require-apple-signing --create-tag --publish", workflow)
+        self.assertIn("needs: [version, compile, windows-host]", workflow)
+        self.assertIn("accept_package.py", workflow)
+        self.assertLess(workflow.index("sign_release.py policy"), workflow.index("git commit"))
+        self.assertEqual(workflow.count("secrets."), 7)
+        self.assertLess(workflow.index("name: Source host, both-target compile, package, sign"),
+                        workflow.index("secrets."))
         self.assertIn("scripts/release_assets.py", workflow)
         self.assertNotIn("continue-on-error", workflow)
 

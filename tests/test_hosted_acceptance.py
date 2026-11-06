@@ -205,23 +205,26 @@ class HostedAcceptanceTests(unittest.TestCase):
         self.assertEqual(report["steps"]["compiled_host"]["status"], "not_run")
         self.assertFalse(report["finished"])
 
-    def test_native_windows_hosted_acceptance_in_ci_and_publish(self):
+    def test_macos_hosted_acceptance_and_windows_package_host_in_ci_and_publish(self):
         ci = (ROOT / ".github/workflows/ci.yml").read_text()
         self.assertEqual(ci.count("accept_hosted.py"), 1)
-        windows = ci[ci.index("  windows-host:"):ci.index("  development-host:")]
+        mac = ci[ci.index("  macos-host:"):ci.index("  windows-host:")]
+        self.assertIn("runs-on: macos-15", mac)
+        self.assertIn("--tool4d .tools/tool4d.app/Contents/MacOS/tool4d", mac)
+        windows = ci[ci.index("  windows-host:"):]
         self.assertIn("runs-on: windows-2022", windows)
-        self.assertIn("name: cli-windows-x64", windows)
-        self.assertIn("download-tool4d", windows)
-        self.assertIn("--tool4d .tools/tool4d/tool4d.exe", windows)
+        self.assertIn("needs: [configuration, macos-host]", windows)
         self.assertIn("name: compiled-component", windows)
-        self.assertIn("assemble --local-development", ci)
+        self.assertIn("accept_package.py", windows)
+        self.assertIn("--tool4d .tools/tool4d/tool4d.exe", windows)
         self.assertNotIn("gh release", ci)
         workflow = (ROOT / ".github/workflows/publish.yml").read_text()
         self.assertIn('accept_hosted.py --repository "$GITHUB_REPOSITORY"', workflow)
         self.assertIn("name: compiled-release", workflow)
         self.assertIn("dist/*.acceptance.json", workflow)
         self.assertIn("name: release-acceptance-diagnostics", workflow)
-        self.assertLess(workflow.index("Require hosted 4D opt-in and the pinned native Windows x64 tool4d"),
+        self.assertIn("needs: [version, compile, windows-host]", workflow)
+        self.assertLess(workflow.index("Require hosted 4D opt-in and the pinned macOS ARM64"),
                         workflow.index("git commit"))
         self.assertLess(workflow.index("accept_hosted.py"), workflow.index("name: compiled-release"))
 

@@ -102,9 +102,16 @@ jobs:
           python-version: '3.12'
       - uses: actions/download-artifact@v4
         with:
-          name: cli-windows-x64
-          path: build/windows-x64
-      - name: Assemble production Windows x64 resource with same-source native manifest
+          pattern: cli-*
+          path: build
+          merge-multiple: false
+      - name: Move native artifacts into per-target build directories
+        run: |
+          for target in macos-x64 macos-arm64 windows-x64; do
+            mkdir -p "build/$target"
+            cp -R "build/cli-$target/." "build/$target/"
+          done
+      - name: Assemble universal macOS and Windows x64 resources with same-source native manifests
         id: assemble
         run: python scripts/ci_config.py assemble
       - uses: actions/upload-artifact@v4
@@ -113,8 +120,61 @@ jobs:
           path: ${{ steps.assemble.outputs.resources }}
           if-no-files-found: error
           retention-days: 7
-  windows-host:
+
+  macos-host:
     needs: [configuration, native]
+    if: needs.configuration.outputs.initialized == 'true' && vars.FOURD_ENABLED == 'true' && github.ref_type != 'tag' && !inputs.release_call
+    runs-on: macos-15
+    env:
+      TOOL4D_URL: ${{ vars.TOOL4D_URL }}
+      TOOL4D_SHA256: ${{ vars.TOOL4D_SHA256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cli-*
+          path: build
+      - name: Move native artifacts into per-target build directories
+        run: |
+          for target in macos-x64 macos-arm64 windows-x64; do
+            mkdir -p "build/$target"
+            cp -R "build/cli-$target/." "build/$target/"
+          done
+      - name: Download pinned free native macOS ARM64 tool4D
+        run: python scripts/ci_config.py download-tool4d
+      - name: Assemble, source host, both-target compile, package and final compiled-ZIP host on macOS 4D
+        run: >-
+          python scripts/accept_hosted.py --repository "$GITHUB_REPOSITORY"
+          --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compiled-component
+          path: |
+            dist/*.zip
+            dist/*.acceptance.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Retain source, compiler and final-host diagnostics even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-acceptance-diagnostics
+          path: |
+            build/hosted-acceptance.json
+            build/source-host-status.json
+            build/compile-status.json
+            build/compiled-host-status.json
+            build/host-status.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  windows-host:
+    needs: [configuration, macos-host]
     if: needs.configuration.outputs.initialized == 'true' && vars.FOURD_ENABLED == 'true' && github.ref_type != 'tag' && !inputs.release_call
     runs-on: windows-2022
     defaults:
@@ -134,80 +194,23 @@ jobs:
         with:
           name: cli-windows-x64
           path: build/windows-x64
-      - name: Download pinned free native Windows x64 tool4D
-        run: python scripts/ci_config.py download-tool4d
-      - name: Source host, x86_64 compile, package and final compiled-ZIP host on native Windows 4D
-        run: >-
-          python scripts/accept_hosted.py --repository "$GITHUB_REPOSITORY"
-          --tool4d .tools/tool4d/tool4d.exe
-      - uses: actions/upload-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: compiled-component
-          path: |
-            dist/*.zip
-            dist/*.acceptance.json
-          if-no-files-found: error
-          retention-days: 30
-      - name: Retain source, compiler and final-host diagnostics even on failure
+          path: dist
+      - name: Download pinned free native Windows x64 tool4D
+        run: python scripts/ci_config.py download-tool4d
+      - name: Load the macOS-compiled ZIP in a real native Windows 4D host
+        run: >-
+          python scripts/accept_package.py --repository "$GITHUB_REPOSITORY"
+          --zip dist/DisplayScale.zip --tool4d .tools/tool4d/tool4d.exe
+      - name: Retain Windows host diagnostics even on failure
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: component-acceptance-diagnostics
+          name: windows-package-host
           path: |
-            build/hosted-acceptance.json
-            build/source-host-status.json
-            build/compile-status.json
-            build/compiled-host-status.json
+            build/package-host-windows-x64.json
             build/host-status.json
           if-no-files-found: warn
           retention-days: 30
-  development-host:
-    needs: [configuration, native]
-    if: needs.configuration.outputs.initialized == 'true' && vars.FOURD_ENABLED == 'true' && github.ref_type != 'tag' && !inputs.release_call
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.source_sha || github.sha }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - uses: actions/download-artifact@v4
-        with:
-          name: cli-macos-arm64
-          path: build/macos-arm64
-      - name: Assemble macOS DEVELOPMENT package (not production release resources)
-        run: python scripts/ci_config.py assemble --local-development
-      - name: Download pinned free tool4D for optional branch and PR integration tests
-        if: vars.FOURD_ENABLED == 'true' && github.ref_type != 'tag' && !inputs.release_call
-        env:
-          TOOL4D_URL: ${{ vars.TOOL4D_URL }}
-          TOOL4D_SHA256: ${{ vars.TOOL4D_SHA256 }}
-        run: python scripts/ci_config.py download-tool4d
-      - name: Test interpreted component from a real 4D host
-        if: vars.FOURD_ENABLED == 'true' && github.ref_type != 'tag' && !inputs.release_call
-        run: python scripts/test_4d.py --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
-      - name: Compile both 4D targets
-        if: vars.FOURD_ENABLED == 'true' && github.ref_type != 'tag' && !inputs.release_call
-        run: python scripts/compile_component.py --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
-      - name: Package and test the actual compiled component
-        if: vars.FOURD_ENABLED == 'true' && github.ref_type != 'tag' && !inputs.release_call
-        shell: python
-        run: |
-          import os, subprocess, sys
-          sys.path.insert(0, "scripts")
-          from ci_config import ROOT, load_config
-          from package_component import package, unpack_for_test
-          config = load_config(initialized=True)
-          archive = package(ROOT, repository=os.environ["GITHUB_REPOSITORY"], tag=config["version"],
-                            local_development=True)
-          component = unpack_for_test(ROOT, archive)
-          subprocess.run([sys.executable, "scripts/test_4d.py", "--tool4d",
-                          ".tools/tool4d.app/Contents/MacOS/tool4d",
-                          "--component", str(component)], check=True)
-      - uses: actions/upload-artifact@v4
-        with:
-          name: development-unsupported-backend
-          path: dist/development/*.zip
-          if-no-files-found: error
-          retention-days: 7

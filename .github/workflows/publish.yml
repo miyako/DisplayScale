@@ -46,7 +46,7 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: python scripts/bump_release.py apply --version "$VERSION" --stage
-      - name: Require hosted 4D opt-in and the pinned native Windows x64 tool4d
+      - name: Require hosted 4D opt-in and the pinned macOS ARM64 and native Windows x64 tool4d
         env:
           FOURD_ENABLED: ${{ vars.FOURD_ENABLED }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
@@ -56,14 +56,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: python scripts/release_ref.py available --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG"
-      - name: Resolve version signing policy without accessing secrets
-        id: signing_policy
-        run: python scripts/sign_release.py policy --root .
-      - name: Reject Apple signing for the Windows-only component
-        if: steps.signing_policy.outputs.apple_signing != 'false'
-        run: |
-          echo "Apple signing does not apply to the Windows x64-only DisplayScale component." >&2
-          exit 1
+      - name: Require Apple Developer ID signing and notarization for every release
+        run: python scripts/sign_release.py policy --root . --require-apple-signing
       - name: Commit version updates to main and record the exact build SHA
         id: commit
         env:
@@ -86,10 +80,7 @@ jobs:
 
   compile:
     needs: [version, native]
-    runs-on: windows-2022
-    defaults:
-      run:
-        shell: bash
+    runs-on: macos-15
     env:
       FOURD_ENABLED: ${{ vars.FOURD_ENABLED }}
       TOOL4D_URL: ${{ vars.TOOL4D_URL }}
@@ -106,19 +97,36 @@ jobs:
       - run: python scripts/ci_config.py validate --release --tag "$RELEASE_TAG"
       - uses: actions/download-artifact@v4
         with:
-          name: cli-windows-x64
-          path: build/windows-x64
-      - name: Download SHA-256-verified native Windows x64 tool4D
+          pattern: cli-*
+          path: build
+      - name: Move native artifacts into per-target build directories
+        run: |
+          for target in macos-x64 macos-arm64 windows-x64; do
+            mkdir -p "build/$target"
+            cp -R "build/cli-$target/." "build/$target/"
+          done
+      - name: Download SHA-256-verified native macOS ARM64 tool4D
         run: python scripts/ci_config.py download-tool4d
-      - name: Source host, x86_64 compile, package and final compiled-ZIP host on native Windows 4D
+      - name: Source host, both-target compile, package, sign, notarize and final ZIP host on macOS 4D
+        env:
+          APPLE_DEVELOPER_ID_CERTIFICATE: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE }}
+          APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          NOTARYTOOL_APPLE_ID: ${{ secrets.NOTARYTOOL_APPLE_ID }}
+          NOTARYTOOL_TEAM_ID: ${{ secrets.NOTARYTOOL_TEAM_ID }}
+          NOTARYTOOL_PASSWORD: ${{ secrets.NOTARYTOOL_PASSWORD }}
+          CODESIGN_APPLE_ID: ${{ secrets.CODESIGN_APPLE_ID }}
         run: >-
           python scripts/accept_hosted.py --repository "$GITHUB_REPOSITORY"
-          --tool4d .tools/tool4d/tool4d.exe --tag "$RELEASE_TAG"
+          --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
+          --tag "$RELEASE_TAG" --require-apple-signing
       - uses: actions/upload-artifact@v4
         with:
           name: compiled-release
           path: |
             dist/*.zip
+            dist/*.dmg
+            dist/*-signing.json
             dist/*.acceptance.json
           if-no-files-found: error
           retention-days: 7
@@ -131,13 +139,56 @@ jobs:
             build/hosted-acceptance.json
             build/source-host-status.json
             build/compile-status.json
+            build/unsigned-compiled-host-status.json
             build/compiled-host-status.json
             build/host-status.json
           if-no-files-found: warn
           retention-days: 30
 
-  publish:
+  windows-host:
     needs: [version, compile]
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: bash
+    env:
+      FOURD_ENABLED: ${{ vars.FOURD_ENABLED }}
+      TOOL4D_URL: ${{ vars.TOOL4D_URL }}
+      TOOL4D_SHA256: ${{ vars.TOOL4D_SHA256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.source_sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-windows-x64
+          path: build/windows-x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: compiled-release
+          path: dist
+      - name: Download SHA-256-verified native Windows x64 tool4D
+        run: python scripts/ci_config.py download-tool4d
+      - name: Load the exact signed final ZIP in a real native Windows 4D host
+        run: >-
+          python scripts/accept_package.py --repository "$GITHUB_REPOSITORY"
+          --zip dist/DisplayScale.zip --tool4d .tools/tool4d/tool4d.exe
+      - name: Retain Windows host diagnostics even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-package-host
+          path: |
+            build/package-host-windows-x64.json
+            build/host-status.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  publish:
+    needs: [version, compile, windows-host]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -161,4 +212,4 @@ jobs:
           RELEASE_SHA: ${{ needs.version.outputs.source_sha }}
         run: |
           python scripts/release_assets.py --repository "$GH_REPO" --tag "$RELEASE_TAG" \
-            --sha "$RELEASE_SHA" --create-tag --publish
+            --sha "$RELEASE_SHA" --require-apple-signing --create-tag --publish

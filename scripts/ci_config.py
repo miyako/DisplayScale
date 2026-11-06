@@ -409,8 +409,11 @@ def main():
             tag=(args.tag if args.tag is not None else os.environ.get("GITHUB_REF_NAME", "")) if args.release else None)
         if args.release and os.environ.get("FOURD_ENABLED") != "true":
             raise ValueError("releases require FOURD_ENABLED=true")
-        if args.release and config.get("resource_targets") == ["windows-x64"]:
-            # Windows-only releases are compiled and host-accepted by native Windows x64 tool4d.
+        if args.release:
+            # Windows-only releases are compiled on native Windows; universal ones on macOS and
+            # additionally host-accepted on native Windows x64 tool4d.
+            if config.get("resource_targets") != ["windows-x64"]:
+                tool_pin(args.root, "macos-arm64")
             tool_pin(args.root, "windows-x64")
         if args.local_development and args.command != "assemble":
             raise ValueError("--local-development applies only to assemble")
