@@ -29,12 +29,11 @@ Function _decode($result : Object; $field : Text)->$decoded : Object
 		return This._invalid($result; "CLI response must be exactly one JSON line with LF")
 	End if
 	$previous:=Method called on error(ek local)
-	CLI_LastErrors:=Null
+	_CaptureError("reset")
 	ON ERR CALL("_CaptureError"; ek local)
 	$payload:=JSON Parse($result.stdout)
 	ON ERR CALL($previous; ek local)
-	$parseErrors:=CLI_LastErrors
-	CLI_LastErrors:=Null
+	$parseErrors:=_CaptureError("take")
 	If (($parseErrors#Null) | (Value type($payload)#Is object))
 		$result.ok:=False
 		$result.error:=New object("code"; "invalid_protocol"; "message"; "CLI response must be a JSON object"; "details"; $parseErrors)

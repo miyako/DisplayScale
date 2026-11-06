@@ -72,12 +72,11 @@ Function execute($file : 4D.File; $arguments : Collection)->$result : Object
 	End for each
 	$options:=New object("dataType"; "text"; "encoding"; "UTF-8"; "hideWindow"; True; "timeout"; 30; "currentDirectory"; $file.parent)
 	$previous:=Method called on error(ek local)
-	CLI_LastErrors:=Null
+	_CaptureError("reset")
 	ON ERR CALL("_CaptureError"; ek local)
 	$worker:=4D.SystemWorker.new($command; $options)
 	ON ERR CALL($previous; ek local)
-	$launchErrors:=CLI_LastErrors
-	CLI_LastErrors:=Null
+	$launchErrors:=_CaptureError("take")
 	If ($worker=Null)
 		return New object("ok"; False; "error"; New object("code"; "launch_failed"; "message"; "4D could not create the system worker"; "details"; $launchErrors))
 	End if
