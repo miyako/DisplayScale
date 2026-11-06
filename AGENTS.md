@@ -10,29 +10,30 @@ The [README](README.md), [feature contract](component/DisplayScale/Documentation
 [manual Windows checks](tests/manual-windows.md) and [manual macOS checks](tests/manual-macos.md)
 define this destination: effective display scaling on Windows 10 1703+ / Windows
 11 x64 and macOS 11+ (CoreGraphics backend, protocol 2), read-only/on demand.
-Production release resources remain **Windows x64 only**; the macOS backend is
-exercised through the explicit local/CI `--local-development` macOS profile
-(thin native CLI, DEVELOPMENT package that is never a release) until a macOS
-release pipeline (universal resource, macOS 4D host, Publish integration) is
-approved. C++ cannot be cross-built. Preserve all
+Production release resources are a universal macOS CLI (x86_64 + arm64) and a
+Windows x64 CLI in one signed/notarized compiled ZIP. C++ cannot be cross-built:
+each native CLI comes from its own CI runner. Preserve all
 same-source/provenance, real compiler, source-stripping and final unpacked-host
 gates. Windows CLI CI, Windows 4D host acceptance and physical/manual topology
-acceptance are distinct. Windows 4D host acceptance runs on native `windows-2022`
-with the pinned `package.json.tool_windows` tool4d (x86_64-only compile); never
-substitute macOS error-path checks or ARM64-emulated Windows runs.
+acceptance are distinct. The package is compiled on native macOS ARM64
+(`x86_64_generic` + `arm64_macOS_lib`, pinned `package.json.tool`), then the exact
+final ZIP is loaded on native `windows-2022` with the pinned
+`package.json.tool_windows` tool4d (`scripts/accept_package.py`); never
+substitute macOS error-path checks or ARM64-emulated Windows runs. Intel macOS 4D
+remains `not_run`.
 
 The template's patch/minor/major **Publish** workflow is ported with these
 DisplayScale deviations, which override the generic Publish text below:
-`ci.yml` runs `accept_hosted.py` only in its native Windows `windows-host` job
-(plus the optional macOS development backend); Publish's `version` job requires
-`FOURD_ENABLED=true` and the Windows tool4d pin at
-`ci_config.py validate --release`, before any commit, tag or release, and its
-`compile` job runs on `windows-2022`; it has
-no `require_apple_signing` input, uses no Apple secrets, downloads no macOS
-CLI and rejects a signing-required `release-policy.json`. `bump_release.py`
-also updates `cli/display.hpp`, the `Display.4dm` version check and the
-`x.y.z.0` Windows manifest identity. A Windows-only release requires
-`windows_4d` passed and exactly `x86_64_generic` compiler targets.
+`ci.yml` builds three native CLIs, assembles universal resources, runs
+`accept_hosted.py` on macOS (`macos-host`) and loads that ZIP on native Windows
+(`windows-host`). Publish's `version` job requires `FOURD_ENABLED=true` and both
+tool4d pins at `ci_config.py validate --release`, and always requires Apple
+signing (`sign_release.py policy --require-apple-signing`) before any commit,
+tag or release. Its `compile` job (macOS) uses the seven Apple secrets only in the
+`accept_hosted.py --require-apple-signing` step; `windows-host` must then load the
+exact signed final ZIP before `publish` runs. `bump_release.py` also updates
+`cli/display.hpp`, the `Display.4dm` version check and the `x.y.z.0` Windows
+manifest identity.
 
 The fixed tool4d download may redirect from `resources-download.4d.com` to the
 verified exact official HTTPS archive hostname `builds2.4d.com`. Accept only

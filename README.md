@@ -150,43 +150,32 @@ The scaling import may be `SHCORE.dll` or the verified exact OS API-set contract
 No blanket API-set prefix or VC runtime DLL allowlist is used.
 
 Local macOS 4D checks exercise the real macOS backend on the observed display
-topology; they say nothing about Windows monitor detection. Production release
-resources remain Windows x64 only. macOS is validated through the explicit
-development profile, which packages the thin native CLI as a DEVELOPMENT ZIP
-that is never a release; a universal macOS release resource and macOS Publish
-integration are future work. Unsigned macOS executables may be blocked by
-Gatekeeper/quarantine; notarization is not configured for this component.
-
-On native Apple Silicon:
-
-```sh
-python3 scripts/ci_config.py download-tool4d --root .
-python3 scripts/accept_local.py --root . --repository miyako/DisplayScale \
-  --tool4d .tools/tool4d.app/Contents/MacOS/tool4d --local-development
-```
-
-The result is `release_ready:false`; Intel macOS 4D, Windows and manual topology
-checks are separate.
+topology; they say nothing about Windows monitor detection. Releases ship a
+universal macOS CLI and a Windows x64 CLI in one Developer ID signed, notarized
+compiled ZIP (plus DMG and signing evidence); see Publish below. Local full
+acceptance needs the three same-revision native artifacts (C++ cannot be
+cross-built), so it is normally exercised by CI.
 
 Native Windows 4D acceptance uses the free fixed tool4d
 `package.json.tool_windows` pin (20.7 build 101905, Windows x64, SHA256-verified
 `win/tool4d_win.tar.xz`, a bzip2 TAR despite its name). The downloader requires a
 **native** Windows x64 host (ARM64 emulation is rejected) and installs
-`.tools/tool4d/tool4d.exe`. On Windows the compiler driver builds
-`x86_64_generic` only, because Windows 4D cannot link `arm64_macOS_lib`
-([#2](https://github.com/miyako/DisplayScale/issues/2)); the packager and release
-verifier accept that x86_64-only target set only for this Windows-only
-configuration and only with native Windows host evidence (`windows_4d` passed).
+`.tools/tool4d/tool4d.exe`. The macOS-compiled package (`x86_64_generic` + `arm64_macOS_lib`) is loaded on
+native Windows with `scripts/accept_package.py`; a Windows-only configuration
+(`resource_targets: ["windows-x64"]`) can still be compiled on Windows, where
+only `x86_64_generic` links
+([#2](https://github.com/miyako/DisplayScale/issues/2)).
 
 ```sh
 python scripts/ci_config.py download-tool4d --root .
-python scripts/accept_hosted.py --root . --repository miyako/DisplayScale \
-  --tool4d .tools/tool4d/tool4d.exe
+python scripts/accept_package.py --root . --repository miyako/DisplayScale \
+  --zip dist/DisplayScale.zip --tool4d .tools/tool4d/tool4d.exe
 ```
 
-`accept_hosted.py` needs the same-revision `build/windows-x64` CLI and manifest,
-then runs real source host tests, compilation, packaging and the unpacked
-compiled-ZIP host test. Physical mixed-scale/RDP topologies
+`accept_package.py` needs the same-revision `build/windows-x64` CLI (for the
+test-only echo helper) and the macOS-built `dist/DisplayScale.zip`, and runs the
+unpacked compiled-ZIP host test. `accept_hosted.py` (macOS) runs assembly, source
+host tests, compilation, packaging and, for releases, signing. Physical mixed-scale/RDP topologies
 ([manual checks](tests/manual-windows.md)) and Dependency-manager installation
 remain separate, `not_run` acceptance. No release/tag is created by build or
 package commands.
@@ -195,27 +184,28 @@ package commands.
 
 Both workflows are started with **Actions → Run workflow**:
 
-* **CI** (any branch): configuration and Python checks, the native Windows x64
-  CLI build/tests and runtime-import check, and production resource assembly.
-  With the repository variable `FOURD_ENABLED=true`, the `windows-host` job
-  (native `windows-2022`) runs source host, x86_64 compile, packaging and the
-  unpacked compiled-ZIP host test, retaining `compiled-component` for 30 days
-  without publication; the macOS development-backend job also runs.
+* **CI** (any branch): configuration and Python checks, native CLI
+  builds/tests on macOS x64/arm64 and Windows x64 (plus the Windows runtime-import
+  check) and universal resource assembly. With the repository variable
+  `FOURD_ENABLED=true`, `macos-host` runs source host, both-target compile,
+  packaging and the unpacked compiled-ZIP host test, and `windows-host` loads
+  that ZIP on native Windows 4D; `compiled-component` is retained for 30 days
+  without publication.
 * **Publish** (`main` only): choose **patch**, **minor** or **major**. The
   next version is computed from the highest stable `X.Y.Z` tag, counting the
-  legacy `v0.1.1` tag only as a migration baseline (patch now yields `0.1.2`).
-  New release tags equal the version with **no `v` prefix** (e.g. `0.1.2`), as
-  the 4D Dependency manager expects; prefixed tags are rejected. The legacy
-  `v0.1.1` tag/release is left untouched. The workflow stages the
-  version surfaces (`scripts/bump_release.py`), then validates before
-  committing anything: `ci_config.py validate --release` requires
-  `FOURD_ENABLED=true` and a valid native Windows x64 tool4d pin, otherwise the
-  run stops with no commit, tag or release. Publish then commits the version
-  bump to `main`, builds the Windows CLI from that exact SHA, and on native
-  `windows-2022` host-tests the source, compiles, packages and host-tests the
-  unpacked compiled ZIP; it creates the tag and release only after final asset
-  validation. Apple signing/notarization does not apply: the workflow uses no
-  Apple secrets and rejects a `release-policy.json` that would require it.
+  legacy `v0.1.1` tag only as a migration baseline. New release tags equal the
+  version with **no `v` prefix**, as the 4D Dependency manager expects. The
+  workflow stages the version surfaces (`scripts/bump_release.py`), then
+  validates before committing anything: `ci_config.py validate --release`
+  requires `FOURD_ENABLED=true` and both tool4d pins, and Apple signing is always
+  required. Publish commits the version bump to `main`, builds the three native
+  CLIs from that exact SHA, and on `macos-15` host-tests the source, compiles
+  both targets, packages, signs with Developer ID, notarizes the DMG, repacks
+  the ZIP from it and host-tests the exact final ZIP. `windows-host` then loads
+  that ZIP on native Windows 4D. The tag and release are created only after final
+  asset validation. Register the seven Apple secrets (see AGENTS.md) in the
+  repository before the first run; without them Publish fails closed.
+
 ## Installation after an accepted release
 
 No production release is implied by this initial implementation. A future

@@ -627,6 +627,12 @@ class DeliveryTests(unittest.TestCase):
     def test_manual_release_validates_explicit_tag_not_selected_branch_name(self):
         environment = {"GITHUB_REPOSITORY": "owner/example-component",
                        "GITHUB_REF_NAME": "main", "FOURD_ENABLED": "true"}
+        package = json.loads((self.root / "package.json").read_text(encoding="utf-8"))
+        package["tool"] = {"platform": "macos", "branch": "20.x", "version": "20.7", "build": "101905",
+                           "arch": "arm", "sha256": "4" * 64}
+        package["tool_windows"] = {"platform": "win", "branch": "20.x", "version": "20.7", "build": "101905",
+                                   "arch": "x64", "sha256": "3" * 64}
+        (self.root / "package.json").write_text(json.dumps(package), encoding="utf-8")
         with patch.dict(os.environ, environment, clear=True), patch.object(
                 sys, "argv", ["ci_config.py", "validate", "--release", "--tag", "0.1.0",
                               "--root", str(self.root)]):
