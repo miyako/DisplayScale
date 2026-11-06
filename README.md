@@ -208,8 +208,11 @@ Both workflows are started with **Actions → Run workflow**:
 
 ## Installation after an accepted release
 
-No production release is implied by this initial implementation. A future
-accepted asset must be exactly `DisplayScale.zip`, containing
+Releases up to 0.1.3 are **Windows x64 only** and contain no macOS CLI. macOS
+support (protocol 2) ships from the first release published after the signed
+pipeline, and every such release is Developer ID signed and notarized
+(`DisplayScale.dmg` and `DisplayScale-signing.json` accompany the ZIP). An
+accepted dependency asset must be exactly `DisplayScale.zip`, containing
 `DisplayScale.4dbase/DisplayScale.4DZ` and external Resources/Libraries, with 4D
 source stripped and compiler-generated completion metadata retained.
 Use a compatible host's Dependency manager GitHub dependency
