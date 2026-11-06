@@ -10,9 +10,8 @@ File to a physical path using `File(file.platformPath; fk platform path)`, then
 delegates to `_Process`. There is deliberately no PATH search, permission repair,
 shell, download, copied PDF algorithm or queue.
 
-macOS default/`macOS-universal` is retained as a generic adapter target for
-development-only unsupported-platform host validation; it does not enable
-DisplayScale monitor queries. Production resources are Windows-only. Windows requires
+macOS default/`macOS-universal` selects the universal (x86_64 + arm64) CoreGraphics
+CLI resource and enables DisplayScale monitor queries on macOS 11+. Windows requires
 explicit `Windows-x64`. Unknown selection or OS returns an explicit error;
 Windows ARM64 native execution is not implemented. See [Display](Display.md)
 for the common result/error shape.
