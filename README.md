@@ -68,8 +68,7 @@ macOS (`platform:"macos"`), CoreGraphics only:
 
 A default Retina laptop (3024-px panel, 1512-pt mode) reports 200%; with "More
 space" (1800 pt) it reports 168% while `backingScalePercent` stays 200. There is
-no `dpi` on macOS. Mirror sets appear once (`CGGetActiveDisplayList`). If no
-native mode is identifiable or no display is active (headless/locked remote
+no `dpi` on macOS. Mirror sets appear once (`CGGetActiveDisplayList`). If a display flags no native mode (virtual/CI displays), the largest available mode is used. If no display is active (headless/locked remote
 session), the CLI fails with `MACOS_API_ERROR`/`NO_MONITORS`; it never assumes 100%.
 
 No Windows ARM64 promise, settings writes, automatic

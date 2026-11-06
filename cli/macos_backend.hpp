@@ -74,6 +74,8 @@ public:
         mac_detail::ListRef modes(CGDisplayCopyAllDisplayModes(id, options));
         CFRelease(options);
         if (!modes.list) throw Failure("MACOS_API_ERROR", "CGDisplayCopyAllDisplayModes failed");
+        // Virtual/headless displays flag no native mode; use the largest mode.
+        MacScale largest;
         for (CFIndex i = 0; i < CFArrayGetCount(modes.list); ++i) {
             auto mode = static_cast<CGDisplayModeRef>(
                 const_cast<void*>(CFArrayGetValueAtIndex(modes.list, i)));
@@ -81,13 +83,22 @@ public:
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
             const auto flags = CGDisplayModeGetIOFlags(mode);
 #pragma clang diagnostic pop
-            if (!(flags & mac_detail::native_mode_flag)) continue;
             const unsigned width = static_cast<unsigned>(CGDisplayModeGetPixelWidth(mode));
             const unsigned height = static_cast<unsigned>(CGDisplayModeGetPixelHeight(mode));
+            if (static_cast<unsigned long long>(width) * height >
+                static_cast<unsigned long long>(largest.native_width) * largest.native_height) {
+                largest.native_width = width;
+                largest.native_height = height;
+            }
+            if (!(flags & mac_detail::native_mode_flag)) continue;
             if (scale.native_width && (scale.native_width != width || scale.native_height != height))
                 throw Failure("MACOS_API_ERROR", "display reports conflicting native modes");
             scale.native_width = width;
             scale.native_height = height;
+        }
+        if (!scale.native_width || !scale.native_height) {
+            scale.native_width = largest.native_width;
+            scale.native_height = largest.native_height;
         }
         if (!scale.native_width || !scale.native_height)
             throw Failure("MACOS_API_ERROR", "native display mode is unavailable");

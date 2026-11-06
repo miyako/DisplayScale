@@ -73,7 +73,7 @@ space"); `backingScalePercent` uses the current mode's backing pixels (200 for
 every Retina mode). macOS bounds are CoreGraphics global points, so they are not
 comparable with Windows physical-pixel bounds. `device` is
 `display-<CGDirectDisplayID>` for the current session only. Mirror sets are
-reported once. A missing native mode, no active display or topology churn is an
+reported once. No active display or topology churn is an
 error, never an assumed 100%.
 
 The Windows example above is an illustrative topology, not a fixed test expectation. Bounds are
