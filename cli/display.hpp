@@ -193,7 +193,7 @@ inline Result execute(const std::vector<std::string>& arguments, Backend& backen
         if (!valid_utf8(argument) || argument.find('\0') != std::string::npos)
             return {2, "", error_json("INVALID_ARGUMENTS", usage)};
     if (arguments == std::vector<std::string>{"--version"})
-        return {0, "{\"protocol\":1,\"version\":\"0.1.1\"}\n", ""};
+        return {0, "{\"protocol\":1,\"version\":\"0.1.2\"}\n", ""};
     if (arguments != std::vector<std::string>{"monitors"})
         return {2, "", error_json("INVALID_ARGUMENTS", usage)};
     try {

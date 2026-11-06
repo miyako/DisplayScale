@@ -77,7 +77,7 @@ Strict UTF-8, protocol 1, **one JSON object plus LF**, including on Windows:
 | Command | Exit | Streams |
 | --- | --- | --- |
 | `display-scale monitors` | 0 | stdout `{"protocol":1,"monitors":[...]}`; empty stderr |
-| `display-scale --version` | 0 | stdout `{"protocol":1,"version":"0.1.1"}`; empty stderr |
+| `display-scale --version` | 0 | stdout `{"protocol":1,"version":"0.1.2"}`; empty stderr |
 | Invalid arguments | 2 | empty stdout; versioned error JSON on stderr |
 | Unsupported platform, API/awareness/topology/no-monitor failure | 3 | empty stdout; versioned error JSON on stderr |
 
