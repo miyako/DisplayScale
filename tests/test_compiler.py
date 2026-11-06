@@ -1,6 +1,7 @@
 import importlib.util
 import json
 from pathlib import Path
+import platform
 import shutil
 import subprocess
 import tempfile
@@ -15,6 +16,7 @@ spec.loader.exec_module(compiler)
 
 class CompilerTests(unittest.TestCase):
     def setUp(self):
+        platform.system()  # warm the cache: Windows otherwise shells out under the mocked subprocess
         self.temp = tempfile.TemporaryDirectory(prefix=".compiler-test-", dir=ROOT)
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name).resolve()

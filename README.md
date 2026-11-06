@@ -181,8 +181,11 @@ Both workflows are started with **Actions → Run workflow**:
   unpacked compiled-ZIP host test, retaining `compiled-component` for 30 days
   without publication; the macOS development-backend job also runs.
 * **Publish** (`main` only): choose **patch**, **minor** or **major**. The
-  next version is computed from the highest stable `v*` tag (with none, from
-  `package.json.version`; patch would yield `0.1.1`). The workflow stages the
+  next version is computed from the highest stable `X.Y.Z` tag, counting the
+  legacy `v0.1.1` tag only as a migration baseline (patch now yields `0.1.2`).
+  New release tags equal the version with **no `v` prefix** (e.g. `0.1.2`), as
+  the 4D Dependency manager expects; prefixed tags are rejected. The legacy
+  `v0.1.1` tag/release is left untouched. The workflow stages the
   version surfaces (`scripts/bump_release.py`), then validates before
   committing anything: `ci_config.py validate --release` requires
   `FOURD_ENABLED=true` and a valid native Windows x64 tool4d pin, otherwise the
